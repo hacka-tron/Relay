@@ -1,0 +1,12 @@
+# Private signing key: never commit.
+signing.key
+# Built release artifacts; the example rollout config is tracked.
+releases/*
+!releases/rollout.json
+# Local build output.
+/bin/
+/dist/
+*.old
+pending-update.json
+.worktrees/
+.DS_Store
