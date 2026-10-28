@@ -2,6 +2,7 @@ package updater
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -104,5 +105,49 @@ func TestApplyRefusesSkippedAndUnconfirmedVersions(t *testing.T) {
 	(install.State{Pending: &install.Pending{Version: "1.0.5"}}).Save(exe)
 	if err := c.Apply(context.Background(), fs.m, exe); err == nil {
 		t.Fatal("installed while an earlier update was unconfirmed")
+	}
+}
+
+// A signed release whose download does not match its hash is tried
+// MaxAttempts times, then skipped for good, and the history says so.
+func TestApplyGivesUpOnABadReleaseAfterThreeAttempts(t *testing.T) {
+	c, exe, fs := applySetup(t)
+	c.Restart = func(string) error { t.Fatal("restarted"); return nil }
+	var steps []string
+	c.Notify = func(step, detail string) { steps = append(steps, step) }
+	fs.body = append([]byte("tampered"), fs.body[8:]...) // same size, different bytes
+
+	for i := 1; i <= MaxAttempts; i++ {
+		err := c.Apply(context.Background(), fs.m, exe)
+		if err == nil || errors.Is(err, ErrSkipped) {
+			t.Fatalf("attempt %d: err = %v, want a failure", i, err)
+		}
+	}
+	st, _ := install.LoadState(exe)
+	if !st.Skips("1.1.0") {
+		t.Fatal("version not skipped after MaxAttempts failures")
+	}
+	if last := steps[len(steps)-1]; last != "gaveup" {
+		t.Fatalf("last step %q, want gaveup (steps %v)", last, steps)
+	}
+	if err := c.Apply(context.Background(), fs.m, exe); !errors.Is(err, ErrSkipped) {
+		t.Fatalf("after giving up: %v, want ErrSkipped", err)
+	}
+	if b, _ := os.ReadFile(exe); string(b) != "old program" {
+		t.Fatal("executable changed")
+	}
+}
+
+// A failure that is the network's fault never counts towards giving up.
+func TestApplyNetworkFailuresDoNotCount(t *testing.T) {
+	c, exe, fs := applySetup(t)
+	fs.Close() // the server is gone: every download fails to connect
+	for i := 0; i < MaxAttempts+2; i++ {
+		if err := c.Apply(context.Background(), fs.m, exe); err == nil || errors.Is(err, ErrSkipped) {
+			t.Fatalf("attempt %d: err = %v", i, err)
+		}
+	}
+	if st, _ := install.LoadState(exe); st.Skips("1.1.0") {
+		t.Fatal("a version was skipped because of network failures")
 	}
 }

@@ -34,7 +34,7 @@ Within a few seconds Relay finds the new version, installs it and restarts. Bolt
 go run ./cmd/demo bad
 ```
 
-This builds the next version, signs it, then changes its bytes the way an attacker would. Relay downloads it, sees that it no longer matches its signature, refuses it and keeps running.
+This builds the next version, signs it, then changes its bytes the way an attacker would. Relay downloads it, sees that it no longer matches its signature and refuses it. It tries twice more, then gives up on that version for good and keeps running. Run `next` afterwards and Relay skips straight to the newer good version.
 
 **4. Stop.** Press Ctrl-C in the first terminal. Everything the demo made is in the `demo` folder.
 

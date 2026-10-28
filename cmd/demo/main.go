@@ -224,7 +224,7 @@ func publish(ctx context.Context, bad bool) error {
 
 	done := func(e event) bool {
 		if bad {
-			return e.Step == "rejected" && strings.Contains(e.Detail, "sha256")
+			return e.Step == "gaveup" && strings.Contains(e.Detail, next)
 		}
 		return e.Step == "confirmed" && strings.Contains(e.Detail, next)
 	}
@@ -232,7 +232,7 @@ func publish(ctx context.Context, bad bool) error {
 		return err
 	}
 	if bad {
-		step("Relay refused " + next + " because its hash no longer matches the signed one, and kept running")
+		step("Relay refused " + next + " because its hash no longer matches the signed one. After two retries it gave up on that version and kept running")
 	} else {
 		step("Relay updated itself to " + next)
 	}
