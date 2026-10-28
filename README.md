@@ -109,6 +109,10 @@ Client facts are sent on every check from day one, so most new server-side rules
 
 Binaries are served from the `releases/` directory by the same process. `release.json` stores just a file name and the server prefixes its own `/files/<version>/` path. If `release.json` holds an absolute URL instead, the server passes it through unchanged, so moving binaries to object storage or GitHub Releases is a change to the release tool only.
 
+### Operator page
+
+With `ADMIN_TOKEN` set (16 characters or more), the server also serves `/admin` behind HTTP basic auth (any username, the token as password). It shows each channel with its version, percentage and pause switch, the releases on disk, and the clients that checked in recently with the version they are running. It can also import a release that CI published to GitHub, given `GITHUB_REPO` (and `GITHUB_TOKEN` for a private repository), which is the step between "tagged" and "promotable". Everything the page does, `release promote` does from the command line.
+
 ## Shipping a release
 
 ```sh
@@ -132,7 +136,16 @@ The brief left some things open. These are the answers the design assumes.
 3. **OS code signing and notarization?** Out of scope: Gatekeeper and SmartScreen need paid certificates. Our own signatures cover update integrity; OS signing would be added at build time in `release build`.
 4. **Package managers?** Out of scope. A copy installed by brew, apt or winget should defer to that manager; the natural hook is a build-time flag that disables the updater.
 5. **Rollback?** Required, and automatic.
-6. **Hosting?** The server runs locally for the demo. It is a stateless binary reading a directory, so it deploys unchanged to Cloud Run, Fly.io or a container anywhere (`Dockerfile`, set `BASE_URL` to the public address), with the `releases/` directory synced from object storage. Serve binaries from a CDN at scale.
+6. **Hosting?** The server runs locally for the demo and is also deployed to Cloud Run. It is a stateless binary reading a directory, so it deploys unchanged to Cloud Run, Fly.io or a container anywhere (`Dockerfile`, set `BASE_URL` to the public address). On Cloud Run the `releases/` directory is a Cloud Storage bucket mounted as a volume, so imports and channel changes made on the operator page persist across restarts:
+
+   ```sh
+   gcloud run deploy relay-updateserver --source . --region us-east1 --allow-unauthenticated \
+     --max-instances 1 --env-vars-file run-env.yaml \
+     --add-volume name=releases,type=cloud-storage,bucket=<bucket> \
+     --add-volume-mount volume=releases,mount-path=/data
+   ```
+
+   with `run-env.yaml` holding `BASE_URL`, `RELEASES_DIR: /data`, `ADMIN_TOKEN` and `GITHUB_REPO`. The client list on the operator page is kept in memory per instance, which is why the demo runs one instance. Serve binaries from a CDN at scale.
 
 ## Threat model and limits
 
