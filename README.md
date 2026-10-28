@@ -1,112 +1,94 @@
 # Relay
 
-Relay is a small desktop app that keeps itself up to date. Every minute it asks an update server whether a newer version exists. When one does, it downloads it, checks that it was really published by us, makes sure the new version starts, swaps it in and restarts. Nobody has to touch the machine. If a new version keeps crashing, Relay puts the old one back.
+Relay is a small desktop app that keeps itself up to date. Every minute it asks an update server whether a newer version exists. When one does, it downloads it, checks that it was really published by us, makes sure it starts, swaps it in and restarts. Nobody has to touch the machine, and if a new version keeps crashing, Relay puts the old one back.
 
-The window shows the running version, a history of every update, and Bolt, a small robot who reacts to what the updater is doing.
-
-This repository holds all three parts of the system.
-
-| Part | What it does |
-|---|---|
-| The app (`cmd/app`) | Runs on Mac, Windows and Linux and updates itself |
-| The update server (`cmd/updateserver`) | Tells each app which version it should run and serves the files |
-| The release tool (`cmd/release`) | Builds and signs a release, then makes it available to apps |
+Its window shows the running version, the history of every update, and Bolt, a small robot who reacts to what the updater is doing.
 
 How it works, and why it is safe, is in [docs/DESIGN.md](docs/DESIGN.md).
 
-## Download and run the app
+## Try it on your computer
 
-Download the file for your computer from the [latest release](https://github.com/hacka-tron/Relay/releases/latest).
+The demo runs everything locally, with its own throwaway signing key. It works the same on Mac, Windows and Linux. All you need is [Go](https://go.dev/dl/) 1.26 or later.
 
-| Computer | File |
-|---|---|
-| Mac with Apple Silicon | `Relay-macos-arm64.zip` |
-| Mac with Intel | `Relay-macos-x86_64.zip` |
-| Windows | `app-windows-amd64.exe` |
-| Linux | `app-linux-amd64` or `app-linux-arm64` |
-
-The apps are not signed with a paid Apple or Microsoft certificate, so each computer warns you once the first time you open one. Updates after that install on their own.
-
-**Mac.** Unzip the file and drag `Relay.app` into Applications. Open it from there, not from Downloads, because macOS opens apps in Downloads from a read-only copy that cannot update itself. If macOS blocks it, go to System Settings, then Privacy and Security, and click Open Anyway. You can also install it from Terminal, which skips the warning.
+**1. Start Relay and a local update server.**
 
 ```sh
-gh release download --repo hacka-tron/Relay --pattern Relay-macos-arm64.zip
-ditto -x -k Relay-macos-arm64.zip /Applications && open /Applications/Relay.app
+git clone https://github.com/hacka-tron/Relay.git
+cd Relay
+go run ./cmd/demo start
 ```
 
-**Windows.** Put `app-windows-amd64.exe` in a folder you own, for example a new `Relay` folder on your Desktop, and double-click it. If Windows warns you, click More info, then Run anyway.
+Relay 1.0.0 opens in your browser. Leave this terminal running.
 
-**Linux.** The Linux app shows its window in your browser.
+**2. Publish a new version.** In a second terminal, in the same folder, run
 
 ```sh
-chmod +x app-linux-amd64 && ./app-linux-amd64
+go run ./cmd/demo next
+```
+
+Within a few seconds Relay finds the new version, installs it and restarts. Bolt hops while it installs, the version at the top changes, and both the window and the terminal list each step. Run it again to publish the version after that.
+
+**3. Publish a tampered version.**
+
+```sh
+go run ./cmd/demo bad
+```
+
+This builds the next version, signs it, then changes its bytes the way an attacker would. Relay downloads it, sees that it no longer matches its signature, refuses it and keeps running.
+
+**4. Stop.** Press Ctrl-C in the first terminal. Everything the demo made is in the `demo` folder.
+
+On Mac and Linux, `make demo`, `make next` and `make bad` do the same.
+
+## Install the app
+
+Download the file for your computer from the [latest release](https://github.com/hacka-tron/Relay/releases/latest). The apps are not signed with a paid Apple or Microsoft certificate, so your computer warns you once, the first time you open one.
+
+### Mac
+
+1. Download `Relay-macos-arm64.zip` for Apple Silicon, or `Relay-macos-x86_64.zip` for Intel.
+2. Unzip it and drag `Relay.app` into Applications. Run it from there, because a Mac cannot update apps that run from Downloads.
+3. Open it. If macOS blocks it, go to System Settings, then Privacy and Security, and click Open Anyway.
+
+### Windows
+
+1. Download `app-windows-amd64.exe`.
+2. Move it into a folder you own, for example a new folder called Relay on your Desktop.
+3. Double-click it. If Windows warns you, click More info, then Run anyway.
+
+### Linux
+
+1. Download `app-linux-amd64`, or `app-linux-arm64` for ARM.
+2. Make it executable and run it. Its window opens in your browser.
+
+```sh
+chmod +x app-linux-amd64
+./app-linux-amd64
 ```
 
 ### Settings
 
-Click the gear at the bottom left of the window.
+Click the gear at the bottom left of the window to choose where updates come from and how often Relay checks. Cloud, our live server, is the default. This computer uses an update server on port 8080 of your own machine. Relay checks every minute unless you change it.
 
-- **Get updates from.** Cloud, which is our live server and the default, or This computer, which is an update server on port 8080 of your own machine.
-- **Check every.** From 10 seconds to 1 hour. The default is 1 minute.
+## Publishing a release
 
-Your choices are saved on your computer and apply straight away.
+This part needs write access to this repository, because releases are signed with a key that only its GitHub Actions can use.
 
-## Run an update server on your computer
+1. Tag a commit and push the tag. GitHub Actions builds the app for every platform, signs it and publishes a release in about five minutes.
 
-You need [Go](https://go.dev/dl/) 1.26 or later and a copy of this repository.
+    ```sh
+    git tag -a v1.6.0 -m "v1.6.0"
+    git push origin v1.6.0
+    ```
 
-```sh
-git clone https://github.com/hacka-tron/Relay.git && cd Relay
-go run ./cmd/updateserver
-```
+2. Upload it to the live server's storage.
 
-The server listens on port 8080 and serves whatever is in the `releases` folder. Then open the app's settings and choose This computer.
+    ```sh
+    make fetch VERSION=1.6.0
+    gcloud storage cp -r releases/1.6.0 gs://relay-513017-releases/
+    ```
 
-To see the whole system work end to end in about a minute, run the demo instead. It builds two versions, starts a server and an app, and shows the app updating itself and then refusing a tampered build.
-
-```sh
-make demo                 # Mac or Linux
-.\scripts\demo.ps1        # Windows
-```
-
-## Test a new version
-
-**1. Install the current version** of the app as described above, and leave it running.
-
-**2. Publish a new version** by tagging a commit and pushing the tag. GitHub Actions builds the app for every platform, signs it and publishes a release. This takes about five minutes.
-
-```sh
-git tag -a v1.6.0 -m "v1.6.0"
-git push origin v1.6.0
-```
-
-**3. Offer it to your app.** Pick the server your app is set to.
-
-If your app uses This computer, download the release into the local server and offer it.
-
-```sh
-make fetch VERSION=1.6.0
-go run ./cmd/release promote --version 1.6.0
-```
-
-On Windows without `make`, replace the first line with `gh release download v1.6.0 --dir releases/1.6.0`.
-
-If your app uses Cloud, upload the release to the live server's storage, then offer it on the admin page at `https://relay-updateserver-107741567910.us-east1.run.app/admin` with any username and the admin token as the password.
-
-```sh
-make fetch VERSION=1.6.0
-gcloud storage cp -r releases/1.6.0 gs://relay-513017-releases/
-```
-
-**4. Watch it update.** Within one check interval the app finds the new version and Bolt hops while it installs. The version at the top right changes, and the history lists each step, ending with "confirmed healthy" about 30 seconds later.
-
-| Computer | What you see |
-|---|---|
-| Mac | The window closes and reopens straight away as the new version |
-| Windows | The window closes and a new one opens a second later |
-| Linux | The browser page shows the new version on its own |
-
-To check the version without the window, run the app with `--version`. On a Mac that is `/Applications/Relay.app/Contents/MacOS/relay --version`.
+3. Offer it to apps on the admin page at `https://relay-updateserver-107741567910.us-east1.run.app/admin`, signing in with any username and the admin token as the password. Every installed copy updates within a minute.
 
 ## Development
 

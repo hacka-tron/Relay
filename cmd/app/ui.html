@@ -31,7 +31,6 @@
   .dot { width: 10px; height: 10px; border-radius: 999px; margin-top: 6px; flex-shrink: 0; background: var(--faint); }
   .row .t { font-size: 14px; font-weight: 700; } .row .d { font-size: 12px; color: var(--faint); } .row time { font-size: 12px; color: var(--faint); white-space: nowrap; }
   footer { display: flex; justify-content: space-between; font-size: 12px; color: var(--faint); } footer b { font-weight: 700; color: var(--muted); }
-  .empty { color: var(--faint); font-size: 14px; }
   /* Settings: a gear in the footer pops a sheet up from the bottom, the
      same width as the content column, over a dimmed backdrop. */
   .app { position: relative; }
@@ -126,7 +125,7 @@
       <h2>Update history</h2>
       <button type="button" class="link" id="clear">Clear</button>
     </div>
-    <div class="list" id="history"><div class="empty">nothing yet</div></div>
+    <div class="list" id="history"></div>
   </div>
 
   <footer>
@@ -178,7 +177,7 @@
     var h = s.history || [];
     el('history').innerHTML = h.length ? h.slice(0, 50).map(function (e) {
       return '<div class="row"><div class="dot" style="background:' + (STEP_COLOR[e.step] || 'var(--faint)') + '"></div><div style="flex-grow:1"><div class="t">' + esc(e.detail) + '</div><div class="d">while running v' + esc(e.version) + '</div></div><time>' + fmt(e.time) + '</time></div>';
-    }).join('') : '<div class="empty">nothing yet</div>';
+    }).join('') : '';
   }
   function label(sec) {
     if (sec % 3600 === 0) return (sec / 3600) + ' hr';
