@@ -1,0 +1,53 @@
+# Deploys the update server to Cloud Run whenever a push to main touches
+# the server. Authentication is keyless: GitHub's OIDC token is exchanged
+# for a short-lived Google credential through Workload Identity
+# Federation, so no service account key is stored anywhere. The service's
+# environment variables and the bucket mount are kept from the previous
+# revision; only the image changes.
+name: deploy
+on:
+  push:
+    branches: [main]
+    paths:
+      - cmd/updateserver/**
+      - internal/**
+      - Dockerfile
+      - .dockerignore
+      - go.mod
+      - go.sum
+      - .github/workflows/deploy.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: go test ./...
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
+          service_account: ${{ secrets.GCP_DEPLOY_SA }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: deploy
+        run: |
+          gcloud run deploy relay-updateserver --source . \
+            --project relay-513017 --region us-east1 --quiet
+      - name: smoke test
+        run: |
+          URL=$(gcloud run services describe relay-updateserver --project relay-513017 --region us-east1 --format='value(status.url)')
+          test "$(curl -sf "$URL/health")" = "ok"

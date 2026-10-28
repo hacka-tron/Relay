@@ -149,7 +149,7 @@ The brief left some things open. These are the answers the design assumes.
      --add-volume-mount volume=releases,mount-path=/data
    ```
 
-   with `run-env.yaml` holding `BASE_URL`, `RELEASES_DIR: /data`, `ADMIN_TOKEN` and `GITHUB_REPO`. The client list on the operator page is kept in memory per instance, which is why the demo runs one instance. Serve binaries from a CDN at scale.
+   with `run-env.yaml` holding `BASE_URL`, `RELEASES_DIR: /data`, `ADMIN_TOKEN` and `GITHUB_REPO`. After that first deploy, `.github/workflows/deploy.yml` redeploys automatically on every push to `main` that touches the server, keeping the environment and bucket mount from the previous revision. It authenticates with Workload Identity Federation, set up once by `scripts/setup-deploy-identity.sh`, so no cloud key is stored in GitHub. The client list on the operator page is kept in memory per instance, which is why the demo runs one instance. Serve binaries from a CDN at scale.
 
 ## Threat model and limits
 
