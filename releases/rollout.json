@@ -1,0 +1,6 @@
+{
+  "channels": {
+    "stable": { "version": "1.0.0", "rollout_percent": 100, "paused": false },
+    "beta":   { "version": "1.0.0", "rollout_percent": 100, "paused": false }
+  }
+}
