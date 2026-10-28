@@ -22,12 +22,9 @@ rm -rf "$APP"; mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/relay"
 chmod +x "$APP/Contents/MacOS/relay"
 
-ICONSET=$(mktemp -d)/icon.iconset; mkdir -p "$ICONSET"
-for s in 16 32 128 256 512; do
-  sips -z $s $s "$ROOT/build/icon.png" --out "$ICONSET/icon_${s}x${s}.png" >/dev/null
-  sips -z $((s*2)) $((s*2)) "$ROOT/build/icon.png" --out "$ICONSET/icon_${s}x${s}@2x.png" >/dev/null
-done
-iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/icon.icns"
+# The committed icon.icns is copied, never regenerated, so the bundle's
+# sealed resources are byte-identical in every release (see above).
+cp "$ROOT/build/icon.icns" "$APP/Contents/Resources/icon.icns"
 
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>

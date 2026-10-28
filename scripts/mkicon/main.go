@@ -1,6 +1,8 @@
 // Command mkicon draws the app icon (Bolt's face on a rounded square) and
-// writes it as a 1024x1024 PNG. The output is committed as build/icon.png;
-// rerun this only to change the icon:
+// writes it as a 1024x1024 PNG. The output is committed as build/icon.png,
+// along with build/icon.icns made from it on a Mac. Changing the icon
+// changes the macOS bundle's sealed resources, which existing installs are
+// checked against, so only change it together with a new install story:
 //
 //	go run ./scripts/mkicon build/icon.png
 package main
