@@ -256,7 +256,8 @@ func checkServerURL(s string) error {
 		return nil
 	}
 	u, err := url.Parse(s)
-	if err != nil || u.Scheme != "https" || u.Host == "" || strings.ContainsAny(s, " \t\n") || u.Path != "" && u.Path != "/" {
+	if err != nil || u.Scheme != "https" || u.Host == "" || strings.ContainsAny(s, " \t\n") ||
+		u.Path != "" && u.Path != "/" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
 		return fmt.Errorf("--cloud-server %q must be an https address like https://updates.example.com", s)
 	}
 	return nil

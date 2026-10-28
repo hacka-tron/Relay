@@ -162,7 +162,7 @@
       var b = document.createElement('button');
       b.type = 'button'; b.textContent = o.label;
       b.setAttribute('aria-pressed', o.id === s.settings.server ? 'true' : 'false');
-      b.onclick = function () { save({ server: o.id, interval_seconds: s.settings.interval_seconds }); };
+      b.onclick = function () { save({ server: o.id }); };
       el('servers').appendChild(b);
       // The cloud address is not shown; a local or custom one is.
       if (o.id === s.settings.server) { text('server-url', o.id === 'cloud' ? '' : o.url); el('server-url').hidden = o.id === 'cloud'; }
@@ -175,11 +175,16 @@
       opt.value = sec; opt.textContent = label(sec); opt.selected = sec === s.settings.interval_seconds;
       el('interval').appendChild(opt);
     });
-    el('interval').onchange = function () { save({ server: s.settings.server, interval_seconds: Number(el('interval').value) }); el('interval').blur(); };
+    el('interval').onchange = function () { save({ interval_seconds: Number(el('interval').value) }); el('interval').blur(); };
   }
+  // Sends only the field that changed, so a value given on the command
+  // line for this run is never saved by accident.
   function save(v) {
     fetch('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(v) })
-      .then(function () { shown = ''; poll(); });
+      .then(function (r) {
+        shown = ''; poll();
+        if (!r.ok) { el('server-url').hidden = false; text('server-url', 'Could not save that setting.'); }
+      });
   }
   el('clear').onclick = function () {
     fetch('/api/history/clear', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).then(poll);

@@ -93,11 +93,12 @@ func (s *uiState) record(step, detail string) {
 	if len(s.History) > maxHistory {
 		s.History = s.History[:maxHistory]
 	}
-	s.mu.Unlock()
+	// Written under the lock so a Clear cannot land between the two steps.
 	if f, err := os.OpenFile(s.historyPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644); err == nil {
 		json.NewEncoder(f).Encode(ev)
 		f.Close()
 	}
+	s.mu.Unlock()
 }
 
 // clearHistory empties the list and the file.
@@ -193,7 +194,7 @@ func (s *uiState) handleSettings(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "want application/json", http.StatusUnsupportedMediaType)
 		return
 	}
-	var v settings
+	var v settingsChange
 	if err := json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&v); err != nil {
 		http.Error(w, "bad settings", http.StatusBadRequest)
 		return

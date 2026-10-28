@@ -35,11 +35,13 @@ type settings struct {
 	IntervalSeconds int    `json:"interval_seconds"`
 }
 
-// settingsStore holds the current settings. The check loop reads it before
-// every check, the window changes it, and changed wakes the check loop so
-// a new choice is used right away.
+// settingsStore holds the settings. saved is what settings.json holds and
+// the window edits. cur is what the app uses: saved, with any command line
+// overrides for this run on top. The check loop reads cur before every
+// check, and changed wakes it so a new choice is used right away.
 type settingsStore struct {
 	mu      sync.Mutex
+	saved   settings
 	cur     settings
 	options []serverOption
 	path    string
@@ -57,19 +59,26 @@ func serverOptions() []serverOption {
 	return append(opts, serverOption{ID: "local", Label: "This computer", URL: localServer})
 }
 
-// newSettingsStore loads saved settings from dir, falling back to the
-// first server option and a one minute interval.
+// newSettingsStore loads saved settings from dir. Each field is checked on
+// its own, so one stale value (say "cloud" in a build without a cloud
+// server) falls back to its default without losing the other.
 func newSettingsStore(dir string, options []serverOption) *settingsStore {
 	s := &settingsStore{
-		cur:     settings{Server: options[0].ID, IntervalSeconds: 60},
+		saved:   settings{Server: options[0].ID, IntervalSeconds: 60},
 		options: options,
 		path:    filepath.Join(dir, "settings.json"),
 		changed: make(chan struct{}, 1),
 	}
-	var saved settings
-	if b, err := os.ReadFile(s.path); err == nil && json.Unmarshal(b, &saved) == nil && s.check(saved) == nil {
-		s.cur = saved
+	var file settings
+	if b, err := os.ReadFile(s.path); err == nil && json.Unmarshal(b, &file) == nil {
+		if s.knownServer(file.Server) {
+			s.saved.Server = file.Server
+		}
+		if knownInterval(file.IntervalSeconds) {
+			s.saved.IntervalSeconds = file.IntervalSeconds
+		}
 	}
+	s.cur = s.saved
 	return s
 }
 
@@ -79,7 +88,7 @@ func (s *settingsStore) get() settings {
 	return s.cur
 }
 
-// serverURL is the address of the chosen server.
+// serverURL is the address of the server in use.
 func (s *settingsStore) serverURL() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -91,37 +100,68 @@ func (s *settingsStore) serverURL() string {
 	return s.options[0].URL
 }
 
-// check accepts only the offered servers and intervals. The window is the
-// only writer, but it is reachable from the local page, so nothing it
-// sends is trusted.
-func (s *settingsStore) check(v settings) error {
-	found := false
-	for _, o := range s.options {
-		found = found || o.ID == v.Server
-	}
-	if !found {
-		return fmt.Errorf("unknown server %q", v.Server)
-	}
-	for _, n := range intervalChoices {
-		if n == v.IntervalSeconds {
-			return nil
+// knownServer accepts only the compiled-in choices, never "custom": a
+// --server address is for one run and is never saved.
+func (s *settingsStore) knownServer(id string) bool {
+	for _, o := range serverOptions() {
+		if o.ID == id && id != "custom" {
+			return true
 		}
 	}
-	return errors.New("interval must be one of the offered choices")
+	for _, o := range s.options {
+		if o.ID == id && id != "custom" {
+			return true
+		}
+	}
+	return false
 }
 
-// set validates, saves and applies new settings, then wakes the check loop.
-func (s *settingsStore) set(v settings) error {
+func knownInterval(n int) bool {
+	for _, c := range intervalChoices {
+		if c == n {
+			return true
+		}
+	}
+	return false
+}
+
+// settingsChange is what the window sends: only the field the user changed.
+type settingsChange struct {
+	Server          *string `json:"server"`
+	IntervalSeconds *int    `json:"interval_seconds"`
+}
+
+// set applies a change from the window, saves it, and wakes the check
+// loop. The window is reachable from the local page, so nothing it sends
+// is trusted: only offered servers and intervals are accepted. A changed
+// field replaces any command line override of that field.
+func (s *settingsStore) set(c settingsChange) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if err := s.check(v); err != nil {
-		return err
+	next := s.saved
+	if c.Server != nil {
+		if !s.knownServer(*c.Server) {
+			return fmt.Errorf("unknown server %q", *c.Server)
+		}
+		next.Server = *c.Server
 	}
-	b, _ := json.MarshalIndent(v, "", "  ")
+	if c.IntervalSeconds != nil {
+		if !knownInterval(*c.IntervalSeconds) {
+			return errors.New("interval must be one of the offered choices")
+		}
+		next.IntervalSeconds = *c.IntervalSeconds
+	}
+	b, _ := json.MarshalIndent(next, "", "  ")
 	if err := atomicfile.Write(s.path, b, 0o644); err != nil {
 		return err
 	}
-	s.cur = v
+	s.saved = next
+	if c.Server != nil {
+		s.cur.Server = next.Server
+	}
+	if c.IntervalSeconds != nil {
+		s.cur.IntervalSeconds = next.IntervalSeconds
+	}
 	select {
 	case s.changed <- struct{}{}:
 	default: // a wake-up is already pending
@@ -129,9 +169,9 @@ func (s *settingsStore) set(v settings) error {
 	return nil
 }
 
-// override applies command line flags for this run only: they win over
-// the saved settings but are not saved. A --server address that is not one
-// of the options is added as a "Custom" choice.
+// override applies command line flags for this run only: they change cur,
+// never saved. A --server address that is not one of the options is added
+// as a "Custom" choice.
 func (s *settingsStore) override(serverURL string, intervalSeconds int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

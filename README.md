@@ -37,7 +37,7 @@ Linux keeps the browser page on purpose: a native window there needs WebKitGTK a
 - **Update server:** Cloud (the deployed server, built into release builds; its address is not shown in the window) or This computer (`http://localhost:8080`, for demos and development). Release builds start on Cloud.
 - **Check every:** 10 seconds up to 1 hour. Default 1 minute.
 
-A change applies to the very next check, without a restart. Starting the app with `--server` or `--interval` overrides the saved setting for that run only. The page can only choose among these options, and only with a JSON request, which a page on another site cannot send to it.
+A change triggers a check straight away, without a restart. Starting the app with `--server` or `--interval` overrides the saved setting for that run only (an address given with `--server` appears as a third choice, Custom, and is never saved). The page can only save the built-in choices, and only with a JSON request, which a page on another site cannot send to it.
 
 The window shows the running version, a countdown to the next check, and a history of every update step (available, downloaded, installed, confirmed, rejected, rolled back). A character reacts to what the updater is doing: resting while idle, pinging with its antenna during a check, hopping while an update installs, and wincing when a download is refused. The Clear button empties the history. The history lives in `update-history.jsonl` so it survives the restart that every update causes. It and the updater's state file sit beside the executable, except in the macOS app, where they go to `~/Library/Application Support/relay` so the signed bundle is never modified apart from the executable itself.
 

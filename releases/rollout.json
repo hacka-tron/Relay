@@ -1,7 +1,7 @@
 {
   "channels": {
     "stable": {
-      "version": "1.4.0",
+      "version": "1.2.0",
       "rollout_percent": 100,
       "paused": false
     }

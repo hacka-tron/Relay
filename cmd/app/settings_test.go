@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -20,7 +21,7 @@ func TestSettingsDefaultsSaveAndReload(t *testing.T) {
 	if got := s.get(); got.Server != "cloud" || got.IntervalSeconds != 60 {
 		t.Fatalf("defaults: %+v", got)
 	}
-	if err := s.set(settings{Server: "local", IntervalSeconds: 300}); err != nil {
+	if err := s.set(change("local", 300)); err != nil {
 		t.Fatal(err)
 	}
 	if s.serverURL() != localServer {
@@ -39,17 +40,54 @@ func TestSettingsDefaultsSaveAndReload(t *testing.T) {
 
 func TestSettingsRejectUnofferedValues(t *testing.T) {
 	s := newSettingsStore(t.TempDir(), testOptions())
-	for _, v := range []settings{
-		{Server: "evil", IntervalSeconds: 60},
-		{Server: "local", IntervalSeconds: 1},
-		{Server: "local", IntervalSeconds: 0},
-	} {
+	for _, v := range []settingsChange{change("evil", 60), change("local", 1), change("local", 0), change("custom", 60)} {
 		if s.set(v) == nil {
-			t.Fatalf("accepted %+v", v)
+			t.Fatalf("accepted %v %v", *v.Server, *v.IntervalSeconds)
 		}
 	}
 	if s.get().Server != "cloud" {
 		t.Fatal("a rejected value was applied")
+	}
+}
+
+func change(server string, interval int) settingsChange {
+	return settingsChange{Server: &server, IntervalSeconds: &interval}
+}
+
+// The window changes one field at a time. Changing the interval while a
+// --server override is active must save the interval, keep the override
+// for this run, and never save the override.
+func TestSettingsChangeOneFieldKeepsOverrideUnsaved(t *testing.T) {
+	dir := t.TempDir()
+	s := newSettingsStore(dir, testOptions())
+	s.override("http://other.example:9000", 5)
+	interval := 300
+	if err := s.set(settingsChange{IntervalSeconds: &interval}); err != nil {
+		t.Fatal(err)
+	}
+	if s.serverURL() != "http://other.example:9000" || s.get().IntervalSeconds != 300 {
+		t.Fatalf("effective: %s %+v", s.serverURL(), s.get())
+	}
+	again := newSettingsStore(dir, testOptions())
+	if got := again.get(); got.Server != "cloud" || got.IntervalSeconds != 300 {
+		t.Fatalf("saved: %+v", got)
+	}
+	// Choosing a server replaces the override.
+	server := "local"
+	if err := s.set(settingsChange{Server: &server}); err != nil {
+		t.Fatal(err)
+	}
+	if s.serverURL() != localServer {
+		t.Fatalf("server override not replaced: %s", s.serverURL())
+	}
+}
+
+func TestSettingsLoadEachFieldOnItsOwn(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "settings.json"), []byte(`{"server":"gone","interval_seconds":900}`), 0o644)
+	s := newSettingsStore(dir, testOptions())
+	if got := s.get(); got.Server != "cloud" || got.IntervalSeconds != 900 {
+		t.Fatalf("got %+v", got)
 	}
 }
 
@@ -92,11 +130,14 @@ func TestSettingsEndpoint(t *testing.T) {
 	if code := post("text/plain", `{"server":"local","interval_seconds":30}`); code != 415 {
 		t.Fatalf("form-style post: %d, want 415", code)
 	}
-	if code := post("application/json", `{"server":"local","interval_seconds":7}`); code != 400 {
+	if code := post("application/json", `{"interval_seconds":7}`); code != 400 {
 		t.Fatalf("bad interval: %d, want 400", code)
 	}
-	if code := post("application/json", `{"server":"local","interval_seconds":30}`); code != 204 {
-		t.Fatalf("good settings: %d, want 204", code)
+	if code := post("application/json", `{"server":"local"}`); code != 204 {
+		t.Fatalf("server only: %d, want 204", code)
+	}
+	if code := post("application/json", `{"interval_seconds":30}`); code != 204 {
+		t.Fatalf("interval only: %d, want 204", code)
 	}
 
 	resp, err := http.Get(url + "/api/state")

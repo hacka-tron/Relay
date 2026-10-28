@@ -113,7 +113,7 @@ func TestCheckServerURL(t *testing.T) {
 			t.Errorf("rejected %q: %v", ok, err)
 		}
 	}
-	for _, bad := range []string{"http://plain.example", "https://", "https://a b", "relay.example", "https://x.example/path"} {
+	for _, bad := range []string{"http://plain.example", "https://", "https://a b", "relay.example", "https://x.example/path", "https://u:p@x.example", "https://x.example?a=1", "https://x.example#f"} {
 		if checkServerURL(bad) == nil {
 			t.Errorf("accepted %q", bad)
 		}
