@@ -93,7 +93,7 @@ GET /v1/update?client_id=<id>&version=<current>&os=<goos>&arch=<goarch>&channel=
   204  nothing to do
   200  {"version":"1.2.0","os":"linux","arch":"amd64","url":"...","sha256":"...","size":123,"signature":"..."}
 GET /files/<version>/<binary>
-GET /healthz
+GET /health
 ```
 
 The server reads `releases/rollout.json` on every request:

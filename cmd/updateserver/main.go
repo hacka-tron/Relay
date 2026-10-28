@@ -3,7 +3,7 @@
 //	GET /v1/update?client_id=..&version=..&os=..&arch=..&channel=..
 //	    200 with a signed manifest JSON, or 204 when there is nothing to do
 //	GET /files/<version>/<binary>
-//	GET /healthz
+//	GET /health (also /healthz)
 //	GET /admin          operator page, enabled by ADMIN_TOKEN
 //
 // The server holds no secrets. It only decides which already signed
@@ -102,9 +102,11 @@ func (h *handler) routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/update", h.update)
 	mux.HandleFunc("GET /files/{version}/{name}", h.file)
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("ok\n"))
-	})
+	// Both paths: Google's front end answers /healthz itself on run.app
+	// hosts, so a deployment there uses /health.
+	health := func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("ok\n")) }
+	mux.HandleFunc("GET /healthz", health)
+	mux.HandleFunc("GET /health", health)
 	mux.HandleFunc("GET /admin", h.requireAdmin(h.adminGet))
 	mux.HandleFunc("POST /admin/channel", h.requireAdmin(h.adminSetChannel))
 	mux.HandleFunc("POST /admin/channel/delete", h.requireAdmin(h.adminDeleteChannel))
