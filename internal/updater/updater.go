@@ -44,6 +44,7 @@ type Client struct {
 	HTTP      *http.Client // set a Timeout
 	MaxSize   int64        // zero means DefaultMaxSize
 	Log       *slog.Logger
+	Restart   func(exe string) error // nil means install.Restart; tests override it
 }
 
 // Check asks the server for an update. It returns the verified manifest and

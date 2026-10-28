@@ -13,7 +13,7 @@ make demo          # macOS or Linux
 .\scripts\demo.ps1 # Windows
 ```
 
-The demo generates a signing key, builds and signs v1.0.0 and v1.1.0, starts the update server, starts the app at v1.0.0, promotes v1.1.0 and shows the app restarting as v1.1.0 under the same PID. It then publishes a v1.2.0 whose bytes were altered after signing and shows the app refusing it. Everything it creates lives in `./demo`.
+The demo generates a signing key, builds and signs v1.0.0 and v1.1.0, starts the update server, starts the app at v1.0.0, promotes v1.1.0 and shows the app restarting as v1.1.0 under the same PID. It then publishes a v1.2.0 whose bytes were altered after signing and shows the app refusing it. Everything it creates lives in `./demo`, apart from the app's client ID, which goes to the user config directory (`~/Library/Application Support/relay` on macOS, `~/.config/relay` on Linux, `%AppData%\relay` on Windows).
 
 ## How it fits together
 
@@ -68,9 +68,11 @@ Only then is the binary swapped in.
 ## Reliability: what happens when things go wrong
 
 - **Interrupted download.** It goes to a temp file next to the executable and is deleted on any mismatch. Leftover temp files are cleaned on the next start.
-- **Crash during the swap.** The last step is a single `rename`, which the OS makes atomic, so the executable path always holds either the complete old program or the complete new one.
-- **The new version will not start.** The self-test catches this before the swap. If a version passes the self-test but then crashes repeatedly, the start counter in `update-state.json` notices: after two failed starts the third start rolls back to the `.old` binary and records the version so it is never offered again on that machine. After 30 seconds of healthy running the update is confirmed and `.old` is deleted.
+- **Crash during the swap.** The last step is a single `rename`, which the OS makes atomic, so the executable path never holds a half written program. On Linux and macOS it always holds a complete program; on Windows there is a brief window between two renames (see below) in which it is absent, and a failed second rename puts the old program back.
+- **The new version will not start.** The self-test catches this before the swap. If a version passes the self-test but then crashes repeatedly, the start counter in `update-state.json` notices: after two failed starts the third start rolls back to the `.old` binary and records the version so it is never installed again on that machine (the server may keep offering it; the client refuses). This relies on something restarting the program after a crash, see assumption 1 below. After 30 seconds of healthy running (`--confirm-after`) the update is confirmed and `.old` is deleted.
 - **Two copies updating at once.** A lock file next to the executable prevents it. A lock older than ten minutes is treated as left by a crash.
+- **An update arrives before the previous one is confirmed.** It waits. Otherwise `.old` would be overwritten with a version that never proved itself.
+- **A corrupt state file.** It is moved aside and treated as empty. State writes are atomic (write temp, rename) because they happen right after an update, when crashes are most likely.
 - **Server unreachable, bad response, bad manifest.** Logged and retried at the next interval. The program never exits because of the updater.
 - **Fleet polling.** Each check is jittered by up to 20 percent of the interval so clients do not line up.
 - **Operator kill switch.** `paused: true` in `rollout.json` makes the server answer "nothing for you" to everyone, effective on the next request with no restart.
@@ -125,12 +127,12 @@ In CI, pushing a tag such as `v1.2.0` runs `.github/workflows/release.yml`, whic
 
 The brief left some things open. These are the answers the design assumes.
 
-1. **What kind of program is it?** A long-running agent or daemon. Updates are applied silently. For an interactive app the same code would gain a prompt-before-restart mode; for managed fleets, operator pinning.
+1. **What kind of program is it?** A long-running agent or daemon, run under a supervisor (systemd, launchd, a Windows service) that restarts it if it exits. Crash-loop rollback depends on that restart; without a supervisor a crashing version simply stays down. On Windows the restart after an update hands off to a new process, so a service wrapper would instead let the service manager perform the restart. Updates are applied silently. For an interactive app the same code would gain a prompt-before-restart mode; for managed fleets, operator pinning.
 2. **Who runs it?** End-user machines we do not control, possibly offline for long stretches. Hence the retry-forever loop and the strictness about never leaving a broken install behind.
 3. **OS code signing and notarization?** Out of scope: Gatekeeper and SmartScreen need paid certificates. Our own signatures cover update integrity; OS signing would be added at build time in `release build`.
 4. **Package managers?** Out of scope. A copy installed by brew, apt or winget should defer to that manager; the natural hook is a build-time flag that disables the updater.
 5. **Rollback?** Required, and automatic.
-6. **Hosting?** The server runs locally for the demo. It is a stateless binary reading a directory, so it deploys unchanged to Cloud Run, Fly.io or a container anywhere (`Dockerfile`), with the `releases/` directory synced from object storage. Serve binaries from a CDN at scale.
+6. **Hosting?** The server runs locally for the demo. It is a stateless binary reading a directory, so it deploys unchanged to Cloud Run, Fly.io or a container anywhere (`Dockerfile`, set `BASE_URL` to the public address), with the `releases/` directory synced from object storage. Serve binaries from a CDN at scale.
 
 ## Threat model and limits
 

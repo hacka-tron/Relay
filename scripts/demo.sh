@@ -40,7 +40,7 @@ trap 'kill $SERVER ${APP:-} 2>/dev/null || true' EXIT
 
 say "install and start app v1.0.0"
 cp "$DEMO/releases/1.0.0/$BIN" "$DEMO/bin/app"
-"$DEMO/bin/app" --server "http://127.0.0.1:$PORT" --interval 5s >"$DEMO/app.log" 2>&1 &
+"$DEMO/bin/app" --server "http://127.0.0.1:$PORT" --interval 5s --confirm-after 5s >"$DEMO/app.log" 2>&1 &
 APP=$!
 wait_for "hello from v1.0.0" "$DEMO/app.log" 10
 tail -1 "$DEMO/app.log"
@@ -50,6 +50,11 @@ promote 1.1.0
 wait_for "hello from v1.1.0" "$DEMO/app.log" 30
 grep -E "update available|installed|hello from v1.1.0" "$DEMO/app.log" | head -4
 echo "same PID after restart: $APP = $(pgrep -f "$DEMO/bin/app" | head -1)"
+ls "$DEMO/bin"
+
+say "wait for v1.1.0 to be confirmed healthy (5s in the demo, 30s by default)"
+wait_for_gone() { local i; for ((i=0; i<$2; i++)); do [ ! -e "$1" ] && return 0; sleep 1; done; echo "still present: $1"; return 1; }
+wait_for_gone "$DEMO/bin/app.old" 15
 ls "$DEMO/bin"
 
 say "publish a tampered v1.2.0 (bytes changed after signing)"

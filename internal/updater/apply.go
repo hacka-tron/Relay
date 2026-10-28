@@ -24,6 +24,9 @@ func (c *Client) Apply(ctx context.Context, m manifest.Manifest, exe string) err
 	if st.Skips(m.Version) {
 		return fmt.Errorf("updater: version %s was rolled back before, skipping", m.Version)
 	}
+	if st.Pending != nil {
+		return fmt.Errorf("updater: version %s is installed but not yet confirmed healthy, waiting", st.Pending.Version)
+	}
 	unlock, err := install.Lock(exe)
 	if err != nil {
 		return err
@@ -39,17 +42,31 @@ func (c *Client) Apply(ctx context.Context, m manifest.Manifest, exe string) err
 		os.Remove(path)
 		return err
 	}
-	if err := install.Swap(exe, path); err != nil {
+	// Mark the update pending before the swap, not after: if the process
+	// dies between the two steps the new binary must still be watched for
+	// crash loops. A failed swap clears the mark again.
+	st.Pending = &install.Pending{Version: m.Version}
+	if err := st.Save(exe); err != nil {
 		os.Remove(path)
 		return err
 	}
-	st.Pending = &install.Pending{Version: m.Version}
-	if err := st.Save(exe); err != nil {
+	if err := install.Swap(exe, path); err != nil {
+		os.Remove(path)
+		st.Pending = nil
+		st.Save(exe)
 		return err
 	}
 	c.Log.Info("installed, restarting", "new_version", m.Version)
 	// Restart replaces this process, so deferred calls never run; release
 	// the lock by hand first or the new version would find it held.
 	unlock()
+	return c.restart(exe)
+}
+
+// restart is install.Restart unless a test replaced it.
+func (c *Client) restart(exe string) error {
+	if c.Restart != nil {
+		return c.Restart(exe)
+	}
 	return install.Restart(exe)
 }

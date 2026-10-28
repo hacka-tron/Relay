@@ -145,6 +145,34 @@ func TestConfirmClearsMarkerAndOld(t *testing.T) {
 	}
 }
 
+func TestCorruptStateIsSetAsideNotFatal(t *testing.T) {
+	exe := fakeExe(t, t.TempDir(), "app", "v1")
+	os.WriteFile(statePath(exe), []byte("{trunc"), 0o644)
+	st, err := LoadState(exe)
+	if err != nil || st.Pending != nil || len(st.Skip) != 0 {
+		t.Fatalf("state=%+v err=%v", st, err)
+	}
+	if _, err := os.Stat(statePath(exe) + ".corrupt"); err != nil {
+		t.Fatal("corrupt file was not moved aside")
+	}
+	if rolled, err := Startup(exe); rolled || err != nil {
+		t.Fatalf("rolled=%v err=%v", rolled, err)
+	}
+}
+
+func TestRollbackWithoutOldClearsPending(t *testing.T) {
+	exe := fakeExe(t, t.TempDir(), "app", "v2")
+	(State{Pending: &Pending{Version: "2.0.0", Attempts: MaxStartAttempts}}).Save(exe)
+	rolled, err := Startup(exe)
+	if rolled || err == nil {
+		t.Fatalf("rolled=%v err=%v, want error and no rollback", rolled, err)
+	}
+	st, _ := LoadState(exe)
+	if st.Pending != nil {
+		t.Fatal("pending not cleared after impossible rollback")
+	}
+}
+
 func TestStartupWithoutStateIsNoop(t *testing.T) {
 	exe := fakeExe(t, t.TempDir(), "app", "v1")
 	if rolled, err := Startup(exe); rolled || err != nil {

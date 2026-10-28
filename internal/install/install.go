@@ -21,6 +21,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/hacka-tron/relay/internal/atomicfile"
 )
 
 // MaxStartAttempts is how many times a freshly installed version may start
@@ -60,7 +62,9 @@ func oldPath(exe string) string   { return exe + ".old" }
 func badPath(exe string) string   { return exe + ".bad" }
 func lockPath(exe string) string  { return filepath.Join(filepath.Dir(exe), "update.lock") }
 
-// LoadState reads update-state.json. A missing file is an empty state.
+// LoadState reads update-state.json. A missing file is an empty state. A
+// file that cannot be parsed is moved aside and also treated as empty,
+// so one corrupt write can never wedge the updater for good.
 func LoadState(exe string) (State, error) {
 	var s State
 	b, err := os.ReadFile(statePath(exe))
@@ -70,16 +74,21 @@ func LoadState(exe string) (State, error) {
 	if err != nil {
 		return s, err
 	}
-	return s, json.Unmarshal(b, &s)
+	if err := json.Unmarshal(b, &s); err != nil {
+		os.Rename(statePath(exe), statePath(exe)+".corrupt")
+		return State{}, nil
+	}
+	return s, nil
 }
 
-// Save writes the state back.
+// Save writes the state back atomically, since it is rewritten at exactly
+// the moments (just after an update) when crashes are most likely.
 func (s State) Save(exe string) error {
 	b, err := json.MarshalIndent(s, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(statePath(exe), b, 0o644)
+	return atomicfile.Write(statePath(exe), b, 0o644)
 }
 
 // SelfTest runs the new binary with --selftest and requires it to exit 0
@@ -92,7 +101,11 @@ func SelfTest(path, wantVersion string) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, path, "--selftest").Output()
+	cmd := exec.CommandContext(ctx, path, "--selftest")
+	// If the binary leaves a child holding stdout open, stop waiting for
+	// the pipe shortly after the timeout instead of hanging forever.
+	cmd.WaitDelay = 2 * time.Second
+	out, err := cmd.Output()
 	if err != nil {
 		return fmt.Errorf("install: self-test of %s failed: %w", path, err)
 	}
@@ -120,6 +133,11 @@ func Swap(exe, newBinary string) error {
 		return fmt.Errorf("install: keep previous version: %w", err)
 	}
 	if err := os.Rename(newBinary, exe); err != nil {
+		// On Windows preserveCurrent moved the program away, so put it
+		// back rather than leave no program at all.
+		if _, statErr := os.Stat(exe); statErr != nil {
+			os.Rename(oldPath(exe), exe)
+		}
 		return fmt.Errorf("install: swap in new version: %w", err)
 	}
 	return nil
@@ -155,6 +173,10 @@ func Startup(exe string) (rolledBack bool, err error) {
 		return false, st.Save(exe)
 	}
 	if err := Rollback(exe); err != nil {
+		// Nothing to go back to (the .old file is gone), so stop counting
+		// and carry on with what is installed.
+		st.Pending = nil
+		st.Save(exe)
 		return false, err
 	}
 	st.Skip = append(st.Skip, st.Pending.Version)

@@ -8,9 +8,11 @@ RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 go build -trimpath -o /updateserver ./cmd/updateserver
 
-FROM gcr.io/distroless/static-debian12
+FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=build /updateserver /updateserver
 COPY releases /releases
+# Set BASE_URL to the public address of the deployment so download links
+# point back at it, for example BASE_URL=https://updates.example.com
 ENV RELEASES_DIR=/releases PORT=8080
 EXPOSE 8080
 ENTRYPOINT ["/updateserver"]

@@ -36,6 +36,7 @@ func main() {
 	server := flag.String("server", "http://localhost:8080", "update server base URL")
 	channel := flag.String("channel", "stable", "release channel to follow")
 	interval := flag.Duration("interval", time.Minute, "how often to check for updates")
+	confirmAfter := flag.Duration("confirm-after", 30*time.Second, "how long a new version must run before it is confirmed and the previous one is dropped")
 	selftest := flag.Bool("selftest", false, "print the version and exit; used to validate a new binary before installing it")
 	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.Parse()
@@ -53,7 +54,7 @@ func main() {
 	if err != nil {
 		log.Error("cannot find own executable; self-update disabled", "err", err)
 	} else {
-		startupChecks(exe, log)
+		startupChecks(exe, *confirmAfter, log)
 		if up := newUpdater(*server, *channel, log); up != nil {
 			go checkLoop(ctx, up, exe, *interval, log)
 		}
@@ -104,6 +105,9 @@ func newUpdater(server, channel string, log *slog.Logger) *updater.Client {
 // percent of jitter so a fleet of clients does not hit the server in step.
 // Errors are logged and retried next time; they never stop the program.
 func checkLoop(ctx context.Context, up *updater.Client, exe string, interval time.Duration, log *slog.Logger) {
+	if interval < time.Second {
+		interval = time.Second
+	}
 	for {
 		if err := checkOnce(ctx, up, exe, log); err != nil {
 			log.Error("update check failed", "err", err)
@@ -128,14 +132,11 @@ func checkOnce(ctx context.Context, up *updater.Client, exe string, log *slog.Lo
 	return up.Apply(ctx, m, exe)
 }
 
-// healthyAfter is how long the program must run after an update before
-// that update is confirmed and the previous binary is dropped.
-const healthyAfter = 30 * time.Second
-
 // startupChecks runs the post-update bookkeeping: clean leftovers, count
 // this start against a pending update and roll back if it keeps failing,
-// and schedule the confirmation that marks the update good.
-func startupChecks(exe string, log *slog.Logger) {
+// and schedule the confirmation that marks the update good once the
+// program has run for confirmAfter.
+func startupChecks(exe string, confirmAfter time.Duration, log *slog.Logger) {
 	dir := filepath.Dir(exe)
 	updater.CleanupTemp(dir)
 	rolledBack, err := install.Startup(exe)
@@ -151,7 +152,7 @@ func startupChecks(exe string, log *slog.Logger) {
 		return
 	}
 	go func() {
-		time.Sleep(healthyAfter)
+		time.Sleep(confirmAfter)
 		if err := install.Confirm(exe); err != nil {
 			log.Error("confirm update failed", "err", err)
 		}

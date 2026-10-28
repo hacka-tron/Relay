@@ -16,6 +16,7 @@ import (
 
 	"golang.org/x/mod/semver"
 
+	"github.com/hacka-tron/relay/internal/atomicfile"
 	"github.com/hacka-tron/relay/internal/manifest"
 )
 
@@ -37,8 +38,8 @@ func build(args []string, out io.Writer) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if !semver.IsValid("v" + *version) {
-		return fmt.Errorf("--version %q is not a valid semantic version", *version)
+	if err := checkVersion(*version); err != nil {
+		return err
 	}
 	priv, err := loadPrivateKey(*keyFile)
 	if err != nil {
@@ -81,7 +82,7 @@ func build(args []string, out io.Writer) error {
 		return err
 	}
 	relPath := filepath.Join(dir, "release.json")
-	if err := os.WriteFile(relPath, append(b, '\n'), 0o644); err != nil {
+	if err := atomicfile.Write(relPath, append(b, '\n'), 0o644); err != nil {
 		return err
 	}
 	fmt.Fprintf(out, "wrote %s (%d targets)\n", relPath, len(rel.Targets))
@@ -97,6 +98,16 @@ func goBuild(goos, goarch, version, pubkey, src, outPath string, out io.Writer) 
 	cmd.Stdout, cmd.Stderr = out, out
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("go build %s/%s: %w", goos, goarch, err)
+	}
+	return nil
+}
+
+// checkVersion requires a full MAJOR.MINOR.PATCH version, optionally with a
+// prerelease tag, written without a leading v. Semver's own rules keep path
+// characters out, so the version is safe to use as a directory name.
+func checkVersion(v string) error {
+	if !semver.IsValid("v"+v) || semver.Canonical("v"+v) != "v"+v {
+		return fmt.Errorf("version %q must look like 1.2.3 or 1.2.3-rc1", v)
 	}
 	return nil
 }

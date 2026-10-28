@@ -77,8 +77,10 @@ func TestBuildProducesSignedRelease(t *testing.T) {
 
 func TestBuildRejectsBadVersionAndMissingKey(t *testing.T) {
 	var out bytes.Buffer
-	if err := run([]string{"build", "--version", "latest"}, &out); err == nil {
-		t.Fatal("accepted non semver version")
+	for _, v := range []string{"latest", "1.2", "v1.2.3", "../x", "1.2.3+build"} {
+		if err := run([]string{"build", "--version", v}, &out); err == nil {
+			t.Fatalf("accepted version %q", v)
+		}
 	}
 	t.Setenv("UPDATER_SIGNING_KEY", "")
 	if err := run([]string{"build", "--version", "1.0.0", "--key", filepath.Join(t.TempDir(), "nope")}, &out); err == nil {
@@ -86,9 +88,26 @@ func TestBuildRejectsBadVersionAndMissingKey(t *testing.T) {
 	}
 }
 
-func TestPromoteRequiresBuiltRelease(t *testing.T) {
+func TestPromoteValidatesInput(t *testing.T) {
 	var out bytes.Buffer
-	if err := run([]string{"promote", "--version", "1.0.0", "--releases", t.TempDir()}, &out); err == nil {
+	dir := t.TempDir()
+	if err := run([]string{"promote", "--version", "1.0.0", "--releases", dir}, &out); err == nil {
 		t.Fatal("promoted a version that was never built")
+	}
+	os.MkdirAll(filepath.Join(dir, "1.0.0"), 0o755)
+	os.WriteFile(filepath.Join(dir, "1.0.0", "release.json"), []byte("{}"), 0o644)
+	bad := [][]string{
+		{"--version", "1.0.0", "--channel", "", "--releases", dir},
+		{"--version", "1.0.0", "--percent", "101", "--releases", dir},
+		{"--version", "1.0.0", "--percent", "-1", "--releases", dir},
+		{"--version", "1.0", "--releases", dir},
+	}
+	for _, args := range bad {
+		if err := run(append([]string{"promote"}, args...), &out); err == nil {
+			t.Fatalf("accepted %v", args)
+		}
+	}
+	if err := run([]string{"promote", "--version", "1.0.0", "--percent", "0", "--releases", dir}, &out); err != nil {
+		t.Fatal(err)
 	}
 }

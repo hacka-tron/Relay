@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/hacka-tron/relay/internal/atomicfile"
 	"github.com/hacka-tron/relay/internal/rollout"
 )
 
@@ -27,8 +28,14 @@ func promote(args []string, out io.Writer) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if *version == "" {
-		return errors.New("--version is required")
+	if err := checkVersion(*version); err != nil {
+		return err
+	}
+	if *channel == "" {
+		return errors.New("--channel must not be empty")
+	}
+	if *percent < 0 || *percent > 100 {
+		return errors.New("--percent must be between 0 and 100")
 	}
 	if _, err := os.Stat(filepath.Join(*dir, *version, "release.json")); err != nil {
 		return fmt.Errorf("no built release for %s in %s; run release build first", *version, *dir)
@@ -46,7 +53,8 @@ func promote(args []string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(path, append(b, '\n'), 0o644); err != nil {
+	// Atomic, because the server may be reading this file right now.
+	if err := atomicfile.Write(path, append(b, '\n'), 0o644); err != nil {
 		return err
 	}
 	fmt.Fprintf(out, "%s: %s -> %s at %d%% (paused=%v)\n", path, *channel, *version, *percent, *paused)
