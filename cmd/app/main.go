@@ -39,6 +39,8 @@ func main() {
 	confirmAfter := flag.Duration("confirm-after", 30*time.Second, "how long a new version must run before it is confirmed and the previous one is dropped")
 	selftest := flag.Bool("selftest", false, "print the version and exit; used to validate a new binary before installing it")
 	showVersion := flag.Bool("version", false, "print the version and exit")
+	uiAddr := flag.String("ui", "127.0.0.1:4780", "address for the local window page; empty disables it")
+	open := flag.Bool("open", true, "open the window in a browser on a fresh start")
 	flag.Parse()
 
 	if *selftest || *showVersion {
@@ -54,9 +56,22 @@ func main() {
 	if err != nil {
 		log.Error("cannot find own executable; self-update disabled", "err", err)
 	} else {
-		startupChecks(exe, *confirmAfter, log)
-		if up := newUpdater(*server, *channel, log); up != nil {
-			go checkLoop(ctx, up, exe, *interval, log)
+		up := newUpdater(*server, *channel, log)
+		ui := newUIState(version, *channel, *server, clientIDOf(up), exe)
+		afterUpdate := startupChecks(exe, *confirmAfter, ui, log)
+		if *uiAddr != "" {
+			if url := serveUI(*uiAddr, ui, log); url != "" {
+				log.Info("window", "url", url)
+				// After an update the page is already open and polling;
+				// only a fresh start opens a browser tab.
+				if *open && !afterUpdate {
+					openBrowser(url)
+				}
+			}
+		}
+		if up != nil {
+			up.Notify = ui.record
+			go checkLoop(ctx, up, exe, *interval, ui, log)
 		}
 	}
 
@@ -104,57 +119,86 @@ func newUpdater(server, channel string, log *slog.Logger) *updater.Client {
 // checkLoop checks once at startup and then every interval, with up to 20
 // percent of jitter so a fleet of clients does not hit the server in step.
 // Errors are logged and retried next time; they never stop the program.
-func checkLoop(ctx context.Context, up *updater.Client, exe string, interval time.Duration, log *slog.Logger) {
+func checkLoop(ctx context.Context, up *updater.Client, exe string, interval time.Duration, ui *uiState, log *slog.Logger) {
 	if interval < time.Second {
 		interval = time.Second
 	}
 	for {
-		if err := checkOnce(ctx, up, exe, log); err != nil {
+		ui.setStatus("checking", "asking the server what the "+up.Channel+" channel offers")
+		if err := checkOnce(ctx, up, exe, ui, log); err != nil {
 			log.Error("update check failed", "err", err)
+			ui.setStatus("rejected", err.Error())
+		} else {
+			ui.setStatus("idle", "up to date")
 		}
 		jitter := time.Duration(rand.Int64N(int64(interval) / 5))
+		wait := interval - interval/10 + jitter
+		ui.setChecked(time.Now().Add(wait))
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(interval - interval/10 + jitter):
+		case <-time.After(wait):
 		}
 	}
 }
 
 // checkOnce runs one update attempt. Apply only returns on failure; on
 // success the process restarts as the new version.
-func checkOnce(ctx context.Context, up *updater.Client, exe string, log *slog.Logger) error {
+func checkOnce(ctx context.Context, up *updater.Client, exe string, ui *uiState, log *slog.Logger) error {
 	m, ok, err := up.Check(ctx)
 	if err != nil || !ok {
 		return err
 	}
 	log.Info("update available", "new_version", m.Version)
+	ui.setStatus("updating", "installing v"+m.Version)
 	return up.Apply(ctx, m, exe)
+}
+
+// clientIDOf is the ID the updater sends, or "" when there is no updater.
+func clientIDOf(up *updater.Client) string {
+	if up == nil {
+		return ""
+	}
+	return up.ClientID
 }
 
 // startupChecks runs the post-update bookkeeping: clean leftovers, count
 // this start against a pending update and roll back if it keeps failing,
 // and schedule the confirmation that marks the update good once the
-// program has run for confirmAfter.
-func startupChecks(exe string, confirmAfter time.Duration, log *slog.Logger) {
+// program has run for confirmAfter. It reports whether this start follows
+// an update, which the window uses to decide whether to open a browser.
+func startupChecks(exe string, confirmAfter time.Duration, ui *uiState, log *slog.Logger) (afterUpdate bool) {
 	dir := filepath.Dir(exe)
 	updater.CleanupTemp(dir)
+	st, _ := install.LoadState(exe)
+	afterUpdate = st.Pending != nil
 	rolledBack, err := install.Startup(exe)
 	if err != nil {
 		log.Error("startup check failed", "err", err)
-		return
+		return afterUpdate
 	}
 	if rolledBack {
 		log.Warn("new version failed to start repeatedly; rolled back, restarting previous version")
+		ui.record("rolledback", "v"+st.Pending.Version+" kept failing to start; rolled back")
 		if err := install.Restart(exe); err != nil {
 			log.Error("restart after rollback failed", "err", err)
 		}
-		return
+		return afterUpdate
+	}
+	if afterUpdate {
+		ui.record("started", "started as v"+version+" after update, watching for problems")
+	} else {
+		ui.record("started", "started as v"+version)
 	}
 	go func() {
 		time.Sleep(confirmAfter)
 		if err := install.Confirm(exe); err != nil {
 			log.Error("confirm update failed", "err", err)
+			return
+		}
+		if afterUpdate {
+			ui.record("confirmed", "v"+version+" confirmed healthy, previous version removed")
 		}
 	}()
+	return afterUpdate
 }

@@ -45,6 +45,16 @@ type Client struct {
 	MaxSize   int64        // zero means DefaultMaxSize
 	Log       *slog.Logger
 	Restart   func(exe string) error // nil means install.Restart; tests override it
+	// Notify, when set, is called at each step of an update so a UI can
+	// show progress. It must return quickly.
+	Notify func(step, detail string)
+}
+
+// notify calls Notify if one is set.
+func (c *Client) notify(step, detail string) {
+	if c.Notify != nil {
+		c.Notify(step, detail)
+	}
 }
 
 // Check asks the server for an update. It returns the verified manifest and
