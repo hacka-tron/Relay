@@ -2,8 +2,12 @@
 //
 //	release keygen  [--out DIR] [--force]
 //	    write signing.key (private) and pubkey.txt (public)
-//	release build   --version 1.2.0 [--key signing.key] [--out releases] [--targets os/arch,...]
-//	    cross compile the app, hash and sign each binary, write release.json
+//	release build   --version 1.2.0 [--key signing.key] [--out releases] [--targets os/arch,...] [--desktop]
+//	    compile then sign, in one step
+//	release compile --version 1.2.0 [--pubkey pubkey.txt] [--targets ...] [--desktop]
+//	    compile only, with the public key embedded; needs no secret
+//	release sign    --version 1.2.0 [--key signing.key] [--out releases]
+//	    hash and sign every binary in releases/<version>, write release.json
 //	release promote --version 1.2.0 [--channel stable] [--percent 100] [--paused] [--releases releases]
 //	    point a channel in rollout.json at a version
 //
@@ -33,17 +37,21 @@ func main() {
 // tests can call it without touching the real process.
 func run(args []string, out io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("usage: release <keygen|build|promote> [flags]")
+		return errors.New("usage: release <keygen|build|compile|sign|promote> [flags]")
 	}
 	switch args[0] {
 	case "keygen":
 		return keygen(args[1:], out)
 	case "build":
 		return build(args[1:], out)
+	case "compile":
+		return compile(args[1:], out)
+	case "sign":
+		return sign(args[1:], out)
 	case "promote":
 		return promote(args[1:], out)
 	default:
-		return fmt.Errorf("unknown command %q (want keygen, build or promote)", args[0])
+		return fmt.Errorf("unknown command %q (want keygen, build, compile, sign or promote)", args[0])
 	}
 }
 

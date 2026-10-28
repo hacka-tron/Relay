@@ -39,8 +39,9 @@ func main() {
 	confirmAfter := flag.Duration("confirm-after", 30*time.Second, "how long a new version must run before it is confirmed and the previous one is dropped")
 	selftest := flag.Bool("selftest", false, "print the version and exit; used to validate a new binary before installing it")
 	showVersion := flag.Bool("version", false, "print the version and exit")
-	uiAddr := flag.String("ui", "127.0.0.1:4780", "address for the local window page; empty disables it")
-	open := flag.Bool("open", true, "open the window in a browser on a fresh start")
+	uiAddr := flag.String("ui", "127.0.0.1:4780", "browser build only: address for the local page; empty disables it")
+	open := flag.Bool("open", true, "browser build only: open the page in a browser on a fresh start")
+	headless := flag.Bool("headless", false, "no window and no page: run as a background agent")
 	flag.Parse()
 
 	if *selftest || *showVersion {
@@ -52,30 +53,41 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
+	var ui *uiState
+	afterUpdate := false
 	exe, err := os.Executable()
 	if err != nil {
 		log.Error("cannot find own executable; self-update disabled", "err", err)
 	} else {
 		up := newUpdater(*server, *channel, log)
-		ui := newUIState(version, *channel, *server, clientIDOf(up), exe)
-		afterUpdate := startupChecks(exe, *confirmAfter, ui, log)
-		if *uiAddr != "" {
-			if url := serveUI(*uiAddr, ui, log); url != "" {
-				log.Info("window", "url", url)
-				// After an update the page is already open and polling;
-				// only a fresh start opens a browser tab.
-				if *open && !afterUpdate {
-					openBrowser(url)
-				}
-			}
-		}
+		ui = newUIState(version, *channel, *server, clientIDOf(up), exe)
+		afterUpdate = startupChecks(exe, *confirmAfter, ui, log)
 		if up != nil {
 			up.Notify = ui.record
 			go checkLoop(ctx, up, exe, *interval, ui, log)
 		}
 	}
 
-	// The demo "application".
+	go greet(ctx)
+
+	// showWindow blocks until the user quits. The desktop build opens a
+	// native window (window_desktop.go); the plain build serves the page on
+	// localhost and opens a browser tab (window_browser.go). After an
+	// update a browser tab is already open and polling, so only a fresh
+	// start opens one.
+	showWindow(ctx, ui, windowOptions{addr: *uiAddr, openBrowser: *open && !afterUpdate, headless: *headless}, log)
+}
+
+// windowOptions are the window flags. addr and openBrowser apply only to
+// the browser build.
+type windowOptions struct {
+	addr        string
+	openBrowser bool
+	headless    bool
+}
+
+// greet is the demo "application": it prints its version every few seconds.
+func greet(ctx context.Context) {
 	for {
 		fmt.Printf("hello from v%s\n", version)
 		select {

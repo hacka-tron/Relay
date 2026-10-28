@@ -1,17 +1,63 @@
 # Tag a commit v1.2.0 and push the tag: this builds, signs and publishes
-# the release. The signing key lives only in the UPDATER_SIGNING_KEY
-# repository secret (the one line content of signing.key).
+# the release.
+#
+# The desktop window links against each OS's native web engine, so each
+# platform compiles on a matching runner. Those jobs only need the public
+# key (pubkey.txt). One final job downloads every binary, signs them with
+# the UPDATER_SIGNING_KEY secret and publishes, so the private key is
+# exposed to exactly one job.
 name: release
 on:
   push:
     tags: ["v*"]
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  release:
+  compile:
+    strategy:
+      matrix:
+        include:
+          - { runner: macos-latest, targets: "darwin/arm64,darwin/amd64", desktop: true }
+          - { runner: ubuntu-24.04, targets: "windows/amd64", desktop: true }
+          # Linux ships the pure Go build, which shows its page in a browser.
+          # A native window there would need WebKitGTK and a matching glibc
+          # on every machine, and a headless install could never update.
+          - { runner: ubuntu-24.04, targets: "linux/amd64,linux/arm64", desktop: false }
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: compile
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          go run ./cmd/release compile --version "$VERSION" --targets "${{ matrix.targets }}" ${{ matrix.desktop && '--desktop' || '' }}
+      - name: macOS app bundles
+        if: startsWith(matrix.targets, 'darwin')
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          for arch in arm64 amd64; do
+            OUT="$RUNNER_TEMP/bundle-$arch"; mkdir -p "$OUT"
+            scripts/macos-app.sh "releases/$VERSION/app-darwin-$arch" "$OUT"
+            mv "$OUT"/Relay-macos-*.zip "releases/$VERSION/"
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: compiled-${{ strategy.job-index }}
+          path: releases/
+          if-no-files-found: error
+          overwrite: true
+
+  publish:
+    needs: compile
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -20,15 +66,19 @@ jobs:
         with:
           go-version-file: go.mod
       - run: go test ./...
-      - name: build and sign
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: compiled-*
+          path: releases/
+          merge-multiple: true
+      - name: sign
         env:
           UPDATER_SIGNING_KEY: ${{ secrets.UPDATER_SIGNING_KEY }}
-        run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          go run ./cmd/release build --version "$VERSION"
+        run: go run ./cmd/release sign --version "${GITHUB_REF_NAME#v}"
       - name: publish to GitHub Releases
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          gh release create "$GITHUB_REF_NAME" releases/"$VERSION"/* --title "v$VERSION" --generate-notes
+          ls -la "releases/$VERSION"
+          gh release create "$GITHUB_REF_NAME" releases/"$VERSION"/* --repo "$GITHUB_REPOSITORY" --title "v$VERSION" --generate-notes
