@@ -139,10 +139,10 @@
   </div>
 </div>
 <script>
-  // The page is a view of /api/state. The server side changes state in
-  // milliseconds for a plain check, so the checking animation is held for
-  // a couple of seconds whenever a new check is seen, so it is visible.
-  var lastCheck = null, holdUntil = 0, STEP_COLOR = { started: 'var(--green)', confirmed: 'var(--green)', available: 'var(--blue)', downloaded: 'var(--blue)', installed: 'var(--blue)', rejected: 'var(--red)', rolledback: 'var(--red)', gaveup: 'var(--red)' };
+  // The page is a view of /api/state. The app itself keeps "checking" on
+  // for a couple of seconds per check, so the page just shows what it is
+  // told.
+  var shownState = '', STEP_COLOR = { started: 'var(--green)', confirmed: 'var(--green)', available: 'var(--blue)', downloaded: 'var(--blue)', installed: 'var(--blue)', rejected: 'var(--red)', rolledback: 'var(--red)', gaveup: 'var(--red)' };
   function el(id) { return document.getElementById(id); }
   function text(id, v) { el(id).textContent = v; }
   function fmt(t) { var d = new Date(t); return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); }
@@ -155,9 +155,19 @@
     if (never(s.last_check)) s.last_check = null;
     if (never(s.next_check)) s.next_check = null;
     var now = Date.now(), state = s.status;
-    if (s.last_check && s.last_check !== lastCheck) { lastCheck = s.last_check; holdUntil = now + 2500; }
-    if (state === 'idle' && now < holdUntil) state = 'checking';
-    document.body.dataset.state = state;
+    if (state !== shownState) {
+      document.body.dataset.state = shownState = state;
+      // Start the signal rings from the beginning every time a check
+      // starts. Some web engines (the one in the macOS app) otherwise
+      // resume them where they stopped, which can be invisible.
+      if (state === 'checking') {
+        document.querySelectorAll('.ring').forEach(function (r) {
+          r.style.animation = 'none';
+          void r.getBoundingClientRect();
+          r.style.animation = '';
+        });
+      }
+    }
     var next = s.next_check ? new Date(s.next_check).getTime() : 0, last = s.last_check ? new Date(s.last_check).getTime() : 0;
     var secs = Math.max(0, Math.round((next - now) / 1000));
     if (state === 'idle') { text('title', 'Up to date'); el('note').innerHTML = 'Bolt checks for a new version regularly.' + (next ? '<br>Next check in <b>' + secs + 's</b>' : ''); }
@@ -230,7 +240,7 @@
   el('clear').onclick = function () {
     fetch('/api/history/clear', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).then(poll);
   };
-  function poll() { fetch('/api/state').then(function (r) { return r.json(); }).then(function (s) { render(s); renderSettings(s); }).catch(function () {}); }
+  function poll() { fetch('/api/state', { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (s) { render(s); renderSettings(s); }).catch(function () {}); }
   poll(); setInterval(poll, 1000);
 </script>
 </body>
