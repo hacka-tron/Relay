@@ -32,9 +32,9 @@ The builds are not signed with an Apple or Microsoft certificate (that needs pai
 
 Linux keeps the browser page on purpose: a native window there needs WebKitGTK and a recent glibc on every machine, and a server without them could never install an update. Every build accepts `--headless` to run as a background agent with no window or page at all.
 
-**Settings.** The window has two settings, saved in `settings.json` beside the update state, so they survive restarts and updates:
+**Settings.** At the bottom of the window are two settings, saved in `settings.json` beside the update state, so they survive restarts and updates:
 
-- **Update server:** Cloud (the deployed server, built into release builds) or This computer (`http://localhost:8080`, for demos and development). Release builds start on Cloud.
+- **Update server:** Cloud (the deployed server, built into release builds; its address is not shown in the window) or This computer (`http://localhost:8080`, for demos and development). Release builds start on Cloud.
 - **Check every:** 10 seconds up to 1 hour. Default 1 minute.
 
 A change applies to the very next check, without a restart. Starting the app with `--server` or `--interval` overrides the saved setting for that run only. The page can only choose among these options, and only with a JSON request, which a page on another site cannot send to it.

@@ -97,18 +97,18 @@
     <div class="bar"><div id="bar"></div></div>
   </div>
 
-  <div class="settings" id="settings" hidden>
-    <div class="setting"><span id="server-label">Update server</span><div class="seg" id="servers" role="group" aria-labelledby="server-label"></div></div>
-    <div class="hint" id="server-url"></div>
-    <div class="setting"><label for="interval">Check every</label><select id="interval"></select></div>
-  </div>
-
   <div style="display: flex; flex-direction: column; gap: 10px">
     <div style="display: flex; align-items: center; justify-content: space-between">
       <h2>Update history</h2>
       <button type="button" class="link" id="clear">Clear</button>
     </div>
     <div class="list" id="history"><div class="empty">nothing yet</div></div>
+  </div>
+
+  <div class="settings" id="settings" hidden>
+    <div class="setting"><span id="server-label">Update server</span><div class="seg" id="servers" role="group" aria-labelledby="server-label"></div></div>
+    <div class="hint" id="server-url"></div>
+    <div class="setting"><label for="interval">Check every</label><select id="interval"></select></div>
   </div>
 
   <footer><div>server <b id="server"></b></div><div>client <b id="client"></b></div></footer>
@@ -124,7 +124,8 @@
   function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
   function render(s) {
     text('version', 'v' + s.version); text('channel', s.channel + ' channel');
-    text('server', s.server.replace(/^https?:\/\//, '')); text('client', (s.client_id || '').slice(0, 8) || 'none');
+    var cloud = (s.servers || []).filter(function (o) { return o.id === 'cloud' && o.url === s.server; }).length > 0;
+    text('server', cloud ? 'Cloud' : s.server.replace(/^https?:\/\//, '')); text('client', (s.client_id || '').slice(0, 8) || 'none');
     var now = Date.now(), state = s.status;
     if (s.last_check && s.last_check !== lastCheck) { lastCheck = s.last_check; holdUntil = now + 2500; }
     if (state === 'idle' && now < holdUntil) state = 'checking';
@@ -163,7 +164,8 @@
       b.setAttribute('aria-pressed', o.id === s.settings.server ? 'true' : 'false');
       b.onclick = function () { save({ server: o.id, interval_seconds: s.settings.interval_seconds }); };
       el('servers').appendChild(b);
-      if (o.id === s.settings.server) text('server-url', o.url);
+      // The cloud address is not shown; a local or custom one is.
+      if (o.id === s.settings.server) { text('server-url', o.id === 'cloud' ? '' : o.url); el('server-url').hidden = o.id === 'cloud'; }
     });
     var choices = s.intervals.slice();
     if (choices.indexOf(s.settings.interval_seconds) < 0) choices.unshift(s.settings.interval_seconds);
