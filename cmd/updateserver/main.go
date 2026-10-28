@@ -4,6 +4,7 @@
 //	    200 with a signed manifest JSON, or 204 when there is nothing to do
 //	GET /files/<version>/<binary>
 //	GET /healthz
+//	GET /admin          operator page, enabled by ADMIN_TOKEN
 //
 // The server holds no secrets. It only decides which already signed
 // manifest to hand out, so a compromised server can withhold updates but
@@ -34,9 +35,18 @@ func main() {
 	flag.Parse()
 
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	h := newHandler(store{dir: *dir}, *baseURL, logger)
+	// Admin settings come from the environment only, never flags, so they
+	// do not show up in process listings.
+	h.adminToken = os.Getenv("ADMIN_TOKEN")
+	h.githubRepo = os.Getenv("GITHUB_REPO")
+	h.githubToken = os.Getenv("GITHUB_TOKEN")
+	if h.adminToken == "" {
+		logger.Warn("ADMIN_TOKEN not set; /admin is disabled")
+	}
 	srv := &http.Server{
 		Addr:              *addr,
-		Handler:           newHandler(store{dir: *dir}, *baseURL, logger),
+		Handler:           h.routes(),
 		ReadHeaderTimeout: 5 * time.Second,
 		IdleTimeout:       60 * time.Second,
 		// No WriteTimeout on purpose: binary downloads on slow links can
@@ -77,16 +87,28 @@ type handler struct {
 	store   store
 	baseURL string
 	log     *slog.Logger
+	clients *clientLog
+
+	adminToken  string // empty disables /admin
+	githubRepo  string // owner/name, for importing releases
+	githubToken string // optional, needed for private repositories
 }
 
-func newHandler(s store, baseURL string, log *slog.Logger) http.Handler {
-	h := &handler{store: s, baseURL: strings.TrimRight(baseURL, "/"), log: log}
+func newHandler(s store, baseURL string, log *slog.Logger) *handler {
+	return &handler{store: s, baseURL: strings.TrimRight(baseURL, "/"), log: log, clients: newClientLog(1000)}
+}
+
+func (h *handler) routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/update", h.update)
 	mux.HandleFunc("GET /files/{version}/{name}", h.file)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("ok\n"))
 	})
+	mux.HandleFunc("GET /admin", h.requireAdmin(h.adminGet))
+	mux.HandleFunc("POST /admin/channel", h.requireAdmin(h.adminSetChannel))
+	mux.HandleFunc("POST /admin/channel/delete", h.requireAdmin(h.adminDeleteChannel))
+	mux.HandleFunc("POST /admin/import", h.requireAdmin(h.adminImport))
 	return mux
 }
 
@@ -122,6 +144,7 @@ func (h *handler) update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	target, ok := rollout.Decide(f, cfg)
+	h.clients.record(f, target)
 	if !ok {
 		log.Info("no update")
 		w.WriteHeader(http.StatusNoContent)

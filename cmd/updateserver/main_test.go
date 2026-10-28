@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/hacka-tron/relay/internal/manifest"
+	"github.com/hacka-tron/relay/internal/rollout"
 )
 
 // newTestServer builds a releases dir with one rollout.json and one
@@ -36,7 +37,9 @@ func newTestServer(t *testing.T, rolloutJSON string) (*httptest.Server, string) 
 	write("1.1.0/app-linux-amd64", "bytes")
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	srv := httptest.NewServer(newHandler(store{dir: dir}, "http://updates.test/", logger))
+	h := newHandler(store{dir: dir}, "http://updates.test/", logger)
+	h.adminToken = "secret"
+	srv := httptest.NewServer(h.routes())
 	t.Cleanup(srv.Close)
 	return srv, dir
 }
@@ -193,4 +196,8 @@ func TestHealthz(t *testing.T) {
 	if resp.StatusCode != 200 || string(body) != "ok\n" {
 		t.Fatalf("%d %q", resp.StatusCode, body)
 	}
+}
+
+func facts(id string) rollout.Facts {
+	return rollout.Facts{ClientID: id, Version: "1.0.0", OS: "linux", Arch: "amd64", Channel: "stable"}
 }
