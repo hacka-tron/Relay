@@ -11,3 +11,4 @@ pending-update.json
 .worktrees/
 .DS_Store
 /demo/
+/demo-ci/

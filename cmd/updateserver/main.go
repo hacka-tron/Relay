@@ -32,10 +32,12 @@ func main() {
 	addr := flag.String("addr", ":"+envOr("PORT", "8080"), "listen address")
 	dir := flag.String("releases", envOr("RELEASES_DIR", "releases"), "directory holding rollout.json and release folders")
 	baseURL := flag.String("base-url", envOr("BASE_URL", "http://localhost:8080"), "public URL of this server, used to build download links")
+	downloadRate := flag.Int("download-rate", 0, "limit each binary download to this many bytes per second, to imitate a slow network in demos; 0 means no limit")
 	flag.Parse()
 
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	h := newHandler(store{dir: *dir}, *baseURL, logger)
+	h.downloadRate = *downloadRate
 	// Admin settings come from the environment only, never flags, so they
 	// do not show up in process listings.
 	h.adminToken = os.Getenv("ADMIN_TOKEN")
@@ -88,6 +90,8 @@ type handler struct {
 	baseURL string
 	log     *slog.Logger
 	clients *clientLog
+
+	downloadRate int // bytes per second for /files, 0 for no limit
 
 	adminToken  string // empty disables /admin
 	githubRepo  string // owner/name, for importing releases
@@ -204,7 +208,34 @@ func (h *handler) file(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	if h.downloadRate > 0 {
+		w = &slowWriter{ResponseWriter: w, rate: h.downloadRate}
+	}
 	http.ServeFile(w, r, path)
+}
+
+// slowWriter sends a response at about rate bytes per second, to imitate a
+// slow network. After each write it waits until the time that many bytes
+// would have taken at that rate.
+type slowWriter struct {
+	http.ResponseWriter
+	rate    int
+	sent    int
+	started time.Time
+}
+
+func (s *slowWriter) Write(b []byte) (int, error) {
+	if s.started.IsZero() {
+		s.started = time.Now()
+	}
+	n, err := s.ResponseWriter.Write(b)
+	s.sent += n
+	if f, ok := s.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+	due := s.started.Add(time.Duration(float64(s.sent) / float64(s.rate) * float64(time.Second)))
+	time.Sleep(time.Until(due))
+	return n, err
 }
 
 // safeSegment accepts one plain path element: no separators, not hidden,

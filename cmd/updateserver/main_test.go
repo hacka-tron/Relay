@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/hacka-tron/relay/internal/manifest"
 	"github.com/hacka-tron/relay/internal/rollout"
@@ -200,4 +201,25 @@ func TestHealthz(t *testing.T) {
 
 func facts(id string) rollout.Facts {
 	return rollout.Facts{ClientID: id, Version: "1.0.0", OS: "linux", Arch: "amd64", Channel: "stable"}
+}
+
+func TestDownloadRateSlowsFiles(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "rollout.json"), []byte(stable110), 0o644)
+	os.MkdirAll(filepath.Join(dir, "1.1.0"), 0o755)
+	body := strings.Repeat("x", 128<<10) // the file server writes 32 KB at a time
+	os.WriteFile(filepath.Join(dir, "1.1.0", "app"), []byte(body), 0o644)
+	h := newHandler(store{dir: dir}, "http://x", slog.New(slog.NewTextHandler(io.Discard, nil)))
+	h.downloadRate = 256 << 10 // 128 KB at 256 KB/s, so the last piece is held back about 0.4 s
+	srv := httptest.NewServer(h.routes())
+	defer srv.Close()
+
+	began := time.Now()
+	resp, got := get(t, srv.URL+"/files/1.1.0/app")
+	if resp.StatusCode != 200 || string(got) != body {
+		t.Fatalf("status %d, %d bytes", resp.StatusCode, len(got))
+	}
+	if took := time.Since(began); took < 300*time.Millisecond {
+		t.Fatalf("download took %v, want it slowed to about 400ms", took)
+	}
 }
