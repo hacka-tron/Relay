@@ -103,11 +103,6 @@ func (s *settingsStore) serverURL() string {
 // knownServer accepts only the compiled-in choices, never "custom": a
 // --server address is for one run and is never saved.
 func (s *settingsStore) knownServer(id string) bool {
-	for _, o := range serverOptions() {
-		if o.ID == id && id != "custom" {
-			return true
-		}
-	}
 	for _, o := range s.options {
 		if o.ID == id && id != "custom" {
 			return true

@@ -162,7 +162,9 @@
       var b = document.createElement('button');
       b.type = 'button'; b.textContent = o.label;
       b.setAttribute('aria-pressed', o.id === s.settings.server ? 'true' : 'false');
-      b.onclick = function () { save({ server: o.id }); };
+      // Clicking the server already in use does nothing; that also covers
+      // Custom, which exists only for this run and cannot be saved.
+      b.onclick = function () { if (o.id !== s.settings.server) save({ server: o.id }); };
       el('servers').appendChild(b);
       // The cloud address is not shown; a local or custom one is.
       if (o.id === s.settings.server) { text('server-url', o.id === 'cloud' ? '' : o.url); el('server-url').hidden = o.id === 'cloud'; }
