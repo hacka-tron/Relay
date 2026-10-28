@@ -8,7 +8,8 @@
 //
 // Everything goes in ./demo. Ctrl-C in the start terminal stops it all.
 // `go run ./cmd/demo ci` runs start, next and bad in one go without a
-// browser, which is how CI checks updates on every OS.
+// browser, in its own ./demo-ci folder, which is how CI checks updates on
+// every OS.
 package main
 
 import (
@@ -29,17 +30,21 @@ import (
 	"time"
 )
 
-const dir = "demo"
+var exe = map[bool]string{true: ".exe", false: ""}[runtime.GOOS == "windows"]
 
-var (
-	exe       = map[bool]string{true: ".exe", false: ""}[runtime.GOOS == "windows"]
-	tool      = filepath.Join(dir, "release"+exe)
-	server    = filepath.Join(dir, "updateserver"+exe)
-	key       = filepath.Join(dir, "signing.key")
-	releases  = filepath.Join(dir, "releases")
-	appPath   = filepath.Join(dir, "app", "relay-demo"+exe)
+// Paths inside the demo folder. ci uses a different folder so it can never
+// disturb a demo someone is watching.
+var dir, tool, server, key, releases, appPath, uiURLFile string
+
+func useFolder(d string) {
+	dir = d
+	tool = filepath.Join(dir, "release"+exe)
+	server = filepath.Join(dir, "updateserver"+exe)
+	key = filepath.Join(dir, "signing.key")
+	releases = filepath.Join(dir, "releases")
+	appPath = filepath.Join(dir, "app", "relay-demo"+exe)
 	uiURLFile = filepath.Join(dir, "window-url")
-)
+}
 
 const usage = `usage:
   go run ./cmd/demo start   start an update server and Relay 1.0.0, and leave them running
@@ -57,6 +62,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
+	useFolder("demo")
 	var err error
 	switch os.Args[1] {
 	case "start":
@@ -66,6 +72,7 @@ func main() {
 	case "bad":
 		err = publish(ctx, true)
 	case "ci":
+		useFolder("demo-ci")
 		err = ci(ctx)
 	default:
 		fmt.Println(usage)
@@ -87,6 +94,9 @@ type running struct{ server, app *exec.Cmd }
 // start builds everything, starts the server and Relay 1.0.0, and waits
 // for Ctrl-C.
 func start(ctx context.Context) error {
+	if _, err := appState(); err == nil {
+		return errors.New("a demo is already running. Stop it with Ctrl-C in its terminal first")
+	}
 	r, err := launch(ctx, true)
 	defer r.stop()
 	if err != nil {
@@ -134,12 +144,15 @@ func launch(ctx context.Context, openWindow bool) (*running, error) {
 	}
 	serverURL := "http://localhost:" + port
 	step("Starting the update server on " + serverURL)
+	// Downloads are slowed to about 2 MB a second, so each update takes a
+	// few seconds and you can watch it happen.
 	if r.server, err = background(filepath.Join(dir, "server.log"), server,
-		"-addr", "127.0.0.1:"+port, "-releases", releases, "-base-url", serverURL); err != nil {
+		"-addr", "127.0.0.1:"+port, "-releases", releases, "-base-url", serverURL,
+		"-download-rate", "2000000"); err != nil {
 		return r, err
 	}
 	if err := waitFor(ctx, 30*time.Second, func() bool { return get(serverURL+"/health") == nil }); err != nil {
-		return r, errors.New("the update server did not start; see demo/server.log")
+		return r, fmt.Errorf("the update server did not start; see %s", filepath.Join(dir, "server.log"))
 	}
 
 	uiPort, err := freePort("4790")
@@ -160,7 +173,7 @@ func launch(ctx context.Context, openWindow bool) (*running, error) {
 	}
 	err = waitFor(ctx, 60*time.Second, func() bool { s, err := appState(); return err == nil && s.Version == "1.0.0" })
 	if err != nil && !errors.Is(err, context.Canceled) {
-		return r, errors.New("Relay did not start; see demo/app.log")
+		return r, fmt.Errorf("Relay did not start; see %s", filepath.Join(dir, "app.log"))
 	}
 	return r, err
 }
@@ -288,7 +301,7 @@ func watch(ctx context.Context, done func(event) bool) error {
 		return finished
 	})
 	if err != nil && !errors.Is(err, context.Canceled) {
-		return errors.New("Relay did not finish within two minutes; see demo/app.log")
+		return fmt.Errorf("Relay did not finish within two minutes; see %s", filepath.Join(dir, "app.log"))
 	}
 	return err
 }
@@ -353,18 +366,30 @@ func background(logPath, name string, args ...string) (*exec.Cmd, error) {
 	return cmd, cmd.Start()
 }
 
-// freePort returns preferred if nothing is listening on it, otherwise any
-// free port. It probes all interfaces, not just loopback, because a server
-// listening on all interfaces would otherwise go unnoticed.
+// freePort returns preferred if nothing is listening on it, otherwise a
+// port the system picks. A port counts as free only if it can be bound on
+// loopback and on all interfaces, because macOS allows one of the two
+// while the other is taken.
 func freePort(preferred string) (string, error) {
-	for _, addr := range []string{":" + preferred, ":0"} {
-		if ln, err := net.Listen("tcp", addr); err == nil {
-			_, port, _ := net.SplitHostPort(ln.Addr().String())
-			ln.Close()
-			return port, nil
-		}
+	if canBind("127.0.0.1:"+preferred) && canBind(":"+preferred) {
+		return preferred, nil
 	}
-	return "", errors.New("no free port")
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return "", err
+	}
+	defer ln.Close()
+	_, port, _ := net.SplitHostPort(ln.Addr().String())
+	return port, nil
+}
+
+func canBind(addr string) bool {
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return false
+	}
+	ln.Close()
+	return true
 }
 
 func get(url string) error {
