@@ -141,6 +141,9 @@ func newUpdater(server, channel string, log *slog.Logger) *updater.Client {
 // checkLoop checks once at startup and then every interval, with up to 20
 // percent of jitter so a fleet of clients does not hit the server in step.
 // Errors are logged and retried next time; they never stop the program.
+// checkingShownFor is how long the window shows a check in progress.
+const checkingShownFor = 2500 * time.Millisecond
+
 // After every check it reads the interval from the settings, so a new
 // choice in the window applies right away: changing it also cuts the wait
 // short.
@@ -148,7 +151,18 @@ func checkLoop(ctx context.Context, up *updater.Client, exe string, store *setti
 	for {
 		interval := max(time.Duration(store.get().IntervalSeconds)*time.Second, time.Second)
 		ui.setStatus("checking", "asking the server what the "+up.Channel+" channel offers")
-		if err := checkOnce(ctx, up, exe, ui, log); err != nil {
+		began := time.Now()
+		err := checkOnce(ctx, up, exe, ui, log)
+		// A check takes milliseconds. Stay in "checking" long enough that
+		// the window, which asks once a second, always sees it.
+		if err == nil {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(checkingShownFor - time.Since(began)):
+			}
+		}
+		if err != nil {
 			log.Error("update check failed", "err", err)
 			ui.setStatus("rejected", err.Error())
 			// A release that fails its checks is recorded by the updater
