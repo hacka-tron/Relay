@@ -22,10 +22,12 @@ const maxTargets = 20
 // importRelease downloads the assets of GitHub release v<version> into
 // releases/<version>. It uses the GitHub API so that private repositories
 // work too, with GITHUB_TOKEN; public ones need no token. Everything is
-// downloaded into a temporary directory and renamed into place only when
-// complete, so a half imported release can never be promoted. The
-// release.json comes from outside, so every name in it is checked before
-// it is used as a file name.
+// downloaded into a temporary directory first and moved into place file by
+// file with release.json last, so a release only becomes visible (and
+// promotable) once every binary is there. Files are moved one at a time
+// rather than renaming the directory because the Cloud Storage mount used
+// in deployment does not rename directories atomically. The release.json
+// comes from outside, so every name in it is checked before use.
 func (h *handler) importRelease(ctx context.Context, version string) error {
 	if err := checkVersion(version); err != nil {
 		return err
@@ -82,7 +84,17 @@ func (h *handler) importRelease(ctx context.Context, version string) error {
 			return err
 		}
 	}
-	return os.Rename(tmp, filepath.Join(h.store.dir, version))
+
+	final := filepath.Join(h.store.dir, version)
+	if err := os.MkdirAll(final, 0o755); err != nil {
+		return err
+	}
+	for _, m := range r.Targets {
+		if err := os.Rename(filepath.Join(tmp, m.URL), filepath.Join(final, m.URL)); err != nil {
+			return err
+		}
+	}
+	return os.Rename(filepath.Join(tmp, "release.json"), filepath.Join(final, "release.json"))
 }
 
 func (h *handler) githubRequest(ctx context.Context, url, accept string) (*http.Response, error) {

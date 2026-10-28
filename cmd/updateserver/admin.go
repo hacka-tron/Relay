@@ -203,6 +203,10 @@ func (s store) releases() []manifest.Release {
 	var out []manifest.Release
 	matches, _ := filepath.Glob(filepath.Join(s.dir, "*", "release.json"))
 	for _, p := range matches {
+		// Skip in-progress import dirs and anything not named like a version.
+		if checkVersion(filepath.Base(filepath.Dir(p))) != nil {
+			continue
+		}
 		var r manifest.Release
 		if readJSON(p, &r) == nil {
 			out = append(out, r)

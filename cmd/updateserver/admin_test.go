@@ -180,6 +180,22 @@ func TestAdminShowsClientsThatCheckedIn(t *testing.T) {
 	}
 }
 
+func TestReleasesIgnoreTempAndOddDirs(t *testing.T) {
+	srv, dir := newTestServer(t, stable110)
+	for _, d := range []string{".import-1.2.0-abc", "notaversion"} {
+		os.MkdirAll(filepath.Join(dir, d), 0o755)
+		os.WriteFile(filepath.Join(dir, d, "release.json"), []byte(`{"version":"1.2.0"}`), 0o644)
+	}
+	resp := adminReq(t, srv, "GET", "/admin", "secret-token-16ch", nil, "")
+	body, _ := io.ReadAll(resp.Body)
+	if strings.Contains(string(body), "1.2.0") {
+		t.Fatal("temp or odd directory listed as a release")
+	}
+	if !strings.Contains(string(body), "1.1.0") {
+		t.Fatal("real release missing")
+	}
+}
+
 func TestClientLogEvictsOldest(t *testing.T) {
 	l := newClientLog(2)
 	for _, id := range []string{"a", "b", "c"} {
