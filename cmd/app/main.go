@@ -16,6 +16,7 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/hacka-tron/relay/internal/install"
 	"github.com/hacka-tron/relay/internal/manifest"
 	"github.com/hacka-tron/relay/internal/updater"
 )
@@ -48,8 +49,14 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
-	if up := newUpdater(*server, *channel, log); up != nil {
-		go checkLoop(ctx, up, *interval, log)
+	exe, err := os.Executable()
+	if err != nil {
+		log.Error("cannot find own executable; self-update disabled", "err", err)
+	} else {
+		startupChecks(exe, log)
+		if up := newUpdater(*server, *channel, log); up != nil {
+			go checkLoop(ctx, up, exe, *interval, log)
+		}
 	}
 
 	// The demo "application".
@@ -96,9 +103,9 @@ func newUpdater(server, channel string, log *slog.Logger) *updater.Client {
 // checkLoop checks once at startup and then every interval, with up to 20
 // percent of jitter so a fleet of clients does not hit the server in step.
 // Errors are logged and retried next time; they never stop the program.
-func checkLoop(ctx context.Context, up *updater.Client, interval time.Duration, log *slog.Logger) {
+func checkLoop(ctx context.Context, up *updater.Client, exe string, interval time.Duration, log *slog.Logger) {
 	for {
-		if err := checkOnce(ctx, up, log); err != nil {
+		if err := checkOnce(ctx, up, exe, log); err != nil {
 			log.Error("update check failed", "err", err)
 		}
 		jitter := time.Duration(rand.Int64N(int64(interval) / 5))
@@ -110,22 +117,43 @@ func checkLoop(ctx context.Context, up *updater.Client, interval time.Duration, 
 	}
 }
 
-// checkOnce runs one update attempt: check, download, verify. Installing
-// the downloaded binary is the next step of the build and lands here.
-func checkOnce(ctx context.Context, up *updater.Client, log *slog.Logger) error {
+// checkOnce runs one update attempt. Apply only returns on failure; on
+// success the process restarts as the new version.
+func checkOnce(ctx context.Context, up *updater.Client, exe string, log *slog.Logger) error {
 	m, ok, err := up.Check(ctx)
 	if err != nil || !ok {
 		return err
 	}
 	log.Info("update available", "new_version", m.Version)
-	exe, err := os.Executable()
+	return up.Apply(ctx, m, exe)
+}
+
+// healthyAfter is how long the program must run after an update before
+// that update is confirmed and the previous binary is dropped.
+const healthyAfter = 30 * time.Second
+
+// startupChecks runs the post-update bookkeeping: clean leftovers, count
+// this start against a pending update and roll back if it keeps failing,
+// and schedule the confirmation that marks the update good.
+func startupChecks(exe string, log *slog.Logger) {
+	dir := filepath.Dir(exe)
+	updater.CleanupTemp(dir)
+	rolledBack, err := install.Startup(exe)
 	if err != nil {
-		return err
+		log.Error("startup check failed", "err", err)
+		return
 	}
-	path, err := up.Download(ctx, m, filepath.Dir(exe))
-	if err != nil {
-		return err
+	if rolledBack {
+		log.Warn("new version failed to start repeatedly; rolled back, restarting previous version")
+		if err := install.Restart(exe); err != nil {
+			log.Error("restart after rollback failed", "err", err)
+		}
+		return
 	}
-	log.Info("downloaded and verified", "path", path)
-	return nil
+	go func() {
+		time.Sleep(healthyAfter)
+		if err := install.Confirm(exe); err != nil {
+			log.Error("confirm update failed", "err", err)
+		}
+	}()
 }
