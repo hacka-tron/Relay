@@ -41,8 +41,8 @@ func main() {
 	h.adminToken = os.Getenv("ADMIN_TOKEN")
 	h.githubRepo = os.Getenv("GITHUB_REPO")
 	h.githubToken = os.Getenv("GITHUB_TOKEN")
-	if h.adminToken == "" {
-		logger.Warn("ADMIN_TOKEN not set; /admin is disabled")
+	if len(h.adminToken) < minTokenLength {
+		logger.Warn("ADMIN_TOKEN unset or shorter than 16 characters; /admin is disabled")
 	}
 	srv := &http.Server{
 		Addr:              *addr,
@@ -131,8 +131,8 @@ func (h *handler) update(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "client_id, version, os and arch are required", http.StatusBadRequest)
 		return
 	}
-	if len(f.ClientID) > 128 {
-		http.Error(w, "client_id too long", http.StatusBadRequest)
+	if len(f.ClientID) > 128 || len(f.Version) > 64 || len(f.OS) > 32 || len(f.Arch) > 32 || len(f.Channel) > 32 {
+		http.Error(w, "a parameter is too long", http.StatusBadRequest)
 		return
 	}
 	log := h.log.With("client_id", f.ClientID, "version", f.Version, "os", f.OS, "arch", f.Arch, "channel", f.Channel)

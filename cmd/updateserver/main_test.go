@@ -38,7 +38,7 @@ func newTestServer(t *testing.T, rolloutJSON string) (*httptest.Server, string) 
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	h := newHandler(store{dir: dir}, "http://updates.test/", logger)
-	h.adminToken = "secret"
+	h.adminToken = "secret-token-16ch"
 	srv := httptest.NewServer(h.routes())
 	t.Cleanup(srv.Close)
 	return srv, dir

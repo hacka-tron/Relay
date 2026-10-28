@@ -13,7 +13,10 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
+	"sync"
 	"time"
+
+	"golang.org/x/mod/semver"
 
 	"github.com/hacka-tron/relay/internal/atomicfile"
 	"github.com/hacka-tron/relay/internal/manifest"
@@ -34,7 +37,19 @@ var adminHTML string
 
 var adminTmpl = template.Must(template.New("admin").Funcs(template.FuncMap{
 	"ago": func(t time.Time) string { return time.Since(t).Truncate(time.Second).String() + " ago" },
+	"onDisk": func(releases []manifest.Release, version string) bool {
+		for _, r := range releases {
+			if r.Version == version {
+				return true
+			}
+		}
+		return false
+	},
 }).Parse(adminHTML))
+
+// minTokenLength keeps a trivially guessable ADMIN_TOKEN from enabling the
+// page at all.
+const minTokenLength = 16
 
 // adminPage is everything the template needs.
 type adminPage struct {
@@ -48,12 +63,18 @@ type adminPage struct {
 
 func (h *handler) requireAdmin(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if h.adminToken == "" {
+		if len(h.adminToken) < minTokenLength {
 			http.NotFound(w, r)
 			return
 		}
+		// Never cached, never framed by another site (which would let that
+		// site click our buttons with the browser's saved credentials).
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("Content-Security-Policy", "frame-ancestors 'none'")
 		_, pass, ok := r.BasicAuth()
 		if !ok || subtle.ConstantTimeCompare([]byte(pass), []byte(h.adminToken)) != 1 {
+			time.Sleep(300 * time.Millisecond) // slows down guessing
 			w.Header().Set("WWW-Authenticate", `Basic realm="relay admin"`)
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
@@ -82,7 +103,8 @@ func (h *handler) renderAdmin(w http.ResponseWriter, msg, errMsg string) {
 	page := adminPage{Message: msg, Error: errMsg, Clients: h.clients.list()}
 	cfg, err := h.store.rollout()
 	if err != nil {
-		page.Error = "rollout.json: " + err.Error()
+		h.log.Error("admin: read rollout.json", "err", err)
+		page.Error = "rollout.json could not be read; see server log"
 	}
 	if cfg.Channels == nil {
 		cfg.Channels = map[string]rollout.Channel{}
@@ -107,10 +129,12 @@ func (h *handler) adminSetChannel(w http.ResponseWriter, r *http.Request) {
 	percent, err := strconv.Atoi(r.FormValue("percent"))
 	paused := r.FormValue("paused") == "on"
 	switch {
-	case channel == "":
-		err = errors.New("channel is required")
+	case channel == "" || len(channel) > 32 || !safeSegment(channel):
+		err = errors.New("channel must be a short plain name")
 	case err != nil || percent < 0 || percent > 100:
 		err = errors.New("percent must be 0 to 100")
+	case checkVersion(version) != nil:
+		err = checkVersion(version)
 	case !h.store.hasRelease(version):
 		err = fmt.Errorf("no release %q on disk", version)
 	}
@@ -184,11 +208,17 @@ func (s store) releases() []manifest.Release {
 			out = append(out, r)
 		}
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Version > out[j].Version })
+	sort.Slice(out, func(i, j int) bool { return semver.Compare("v"+out[i].Version, "v"+out[j].Version) > 0 })
 	return out
 }
 
+// rolloutMu serializes read-modify-write of rollout.json from the admin
+// page so two operators cannot drop each other's change.
+var rolloutMu sync.Mutex
+
 func (s store) setChannel(name string, ch rollout.Channel) error {
+	rolloutMu.Lock()
+	defer rolloutMu.Unlock()
 	cfg, err := s.rollout()
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
@@ -201,6 +231,8 @@ func (s store) setChannel(name string, ch rollout.Channel) error {
 }
 
 func (s store) deleteChannel(name string) error {
+	rolloutMu.Lock()
+	defer rolloutMu.Unlock()
 	cfg, err := s.rollout()
 	if err != nil {
 		return err

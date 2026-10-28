@@ -45,28 +45,70 @@ func TestAdminRequiresToken(t *testing.T) {
 	if resp := adminReq(t, srv, "GET", "/admin", "wrong", nil, ""); resp.StatusCode != 401 {
 		t.Fatalf("wrong token: %d", resp.StatusCode)
 	}
-	resp := adminReq(t, srv, "GET", "/admin", "secret", nil, "")
+	resp := adminReq(t, srv, "GET", "/admin", "secret-token-16ch", nil, "")
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != 200 || !strings.Contains(string(body), "1.1.0") {
 		t.Fatalf("right token: %d %s", resp.StatusCode, body[:min(len(body), 200)])
 	}
 }
 
-func TestAdminDisabledWithoutToken(t *testing.T) {
-	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "rollout.json"), []byte(stable110), 0o644)
-	h := newHandler(store{dir: dir}, "http://x", slog.New(slog.NewTextHandler(io.Discard, nil)))
-	srv := httptest.NewServer(h.routes())
-	defer srv.Close()
-	if resp := adminReq(t, srv, "GET", "/admin", "anything", nil, ""); resp.StatusCode != 404 {
-		t.Fatalf("admin reachable without ADMIN_TOKEN: %d", resp.StatusCode)
+func TestAdminDisabledWithoutStrongToken(t *testing.T) {
+	for _, token := range []string{"", "short"} {
+		dir := t.TempDir()
+		os.WriteFile(filepath.Join(dir, "rollout.json"), []byte(stable110), 0o644)
+		h := newHandler(store{dir: dir}, "http://x", slog.New(slog.NewTextHandler(io.Discard, nil)))
+		h.adminToken = token
+		srv := httptest.NewServer(h.routes())
+		if resp := adminReq(t, srv, "GET", "/admin", token, nil, ""); resp.StatusCode != 404 {
+			t.Fatalf("token %q: admin reachable: %d", token, resp.StatusCode)
+		}
+		srv.Close()
+	}
+}
+
+func TestAdminSetsFramingAndCacheHeaders(t *testing.T) {
+	srv, _ := newTestServer(t, stable110)
+	resp := adminReq(t, srv, "GET", "/admin", "secret-token-16ch", nil, "")
+	if resp.Header.Get("X-Frame-Options") != "DENY" || resp.Header.Get("Cache-Control") != "no-store" {
+		t.Fatalf("headers: %v", resp.Header)
+	}
+}
+
+func TestAdminShowsMissingVersionAsSelected(t *testing.T) {
+	srv, _ := newTestServer(t, `{"channels":{"stable":{"version":"7.7.7","rollout_percent":100}}}`)
+	resp := adminReq(t, srv, "GET", "/admin", "secret-token-16ch", nil, "")
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), `value="7.7.7" selected`) {
+		t.Fatal("channel pointing at a missing release does not keep it selected")
+	}
+}
+
+func TestUpdateRejectsOverlongFacts(t *testing.T) {
+	srv, _ := newTestServer(t, stable110)
+	long := strings.Repeat("x", 65)
+	resp := adminReq(t, srv, "GET", "/v1/update?client_id=c&version="+long+"&os=linux&arch=amd64", "", nil, "")
+	if resp.StatusCode != 400 {
+		t.Fatalf("status %d, want 400", resp.StatusCode)
+	}
+}
+
+func TestCheckVersion(t *testing.T) {
+	for _, bad := range []string{"", "..", "1.0", "v1.0.0", "1.0.0?x", "1.0.0/..", ".1.0.0", "1.0.0+meta"} {
+		if checkVersion(bad) == nil {
+			t.Errorf("accepted %q", bad)
+		}
+	}
+	for _, good := range []string{"1.0.0", "1.2.3-rc1", "10.20.30"} {
+		if err := checkVersion(good); err != nil {
+			t.Errorf("rejected %q: %v", good, err)
+		}
 	}
 }
 
 func TestAdminSetChannelWritesRollout(t *testing.T) {
 	srv, dir := newTestServer(t, stable110)
 	form := url.Values{"channel": {"beta"}, "version": {"1.1.0"}, "percent": {"25"}, "paused": {"on"}}
-	resp := adminReq(t, srv, "POST", "/admin/channel", "secret", form, srv.URL)
+	resp := adminReq(t, srv, "POST", "/admin/channel", "secret-token-16ch", form, srv.URL)
 	if resp.StatusCode != 303 || !strings.HasPrefix(resp.Header.Get("Location"), "/admin?msg=") {
 		t.Fatalf("status %d location %q", resp.StatusCode, resp.Header.Get("Location"))
 	}
@@ -88,7 +130,7 @@ func TestAdminSetChannelWritesRollout(t *testing.T) {
 		t.Fatalf("paused beta offered: %d", resp.StatusCode)
 	}
 
-	resp = adminReq(t, srv, "POST", "/admin/channel/delete", "secret", url.Values{"channel": {"beta"}}, srv.URL)
+	resp = adminReq(t, srv, "POST", "/admin/channel/delete", "secret-token-16ch", url.Values{"channel": {"beta"}}, srv.URL)
 	if resp.StatusCode != 303 {
 		t.Fatalf("delete: %d", resp.StatusCode)
 	}
@@ -116,7 +158,7 @@ func TestAdminRejectsBadInputAndCrossSite(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			resp := adminReq(t, srv, "POST", "/admin/channel", "secret", tc.form, tc.origin)
+			resp := adminReq(t, srv, "POST", "/admin/channel", "secret-token-16ch", tc.form, tc.origin)
 			if resp.StatusCode != tc.code || !strings.Contains(resp.Header.Get("Location"), tc.want) {
 				t.Fatalf("status %d location %q", resp.StatusCode, resp.Header.Get("Location"))
 			}
@@ -131,7 +173,7 @@ func TestAdminRejectsBadInputAndCrossSite(t *testing.T) {
 func TestAdminShowsClientsThatCheckedIn(t *testing.T) {
 	srv, _ := newTestServer(t, stable110)
 	adminReq(t, srv, "GET", "/v1/update?client_id=visible-client&version=1.0.0&os=linux&arch=amd64", "", nil, "")
-	resp := adminReq(t, srv, "GET", "/admin", "secret", nil, "")
+	resp := adminReq(t, srv, "GET", "/admin", "secret-token-16ch", nil, "")
 	body, _ := io.ReadAll(resp.Body)
 	if !strings.Contains(string(body), "visible-client") {
 		t.Fatal("client check-in not shown on admin page")
@@ -151,7 +193,7 @@ func TestClientLogEvictsOldest(t *testing.T) {
 
 func TestImportRejectsBadVersion(t *testing.T) {
 	srv, _ := newTestServer(t, stable110)
-	resp := adminReq(t, srv, "POST", "/admin/import", "secret", url.Values{"version": {"../x"}}, srv.URL)
+	resp := adminReq(t, srv, "POST", "/admin/import", "secret-token-16ch", url.Values{"version": {"../x"}}, srv.URL)
 	if resp.StatusCode != 303 || !strings.Contains(resp.Header.Get("Location"), "err=") {
 		t.Fatalf("status %d location %q", resp.StatusCode, resp.Header.Get("Location"))
 	}
