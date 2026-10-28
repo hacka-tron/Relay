@@ -28,7 +28,7 @@ import (
 //
 // A plain `go build` leaves them at these defaults: no public key disables
 // the updater, so a developer build never tries to replace itself, and no
-// cloud server means the window only offers a server on this computer.
+// cloud server means the app uses a server on this computer (localhost:8080).
 var (
 	version     = "0.0.0-dev"
 	publicKey   = ""
@@ -36,7 +36,7 @@ var (
 )
 
 func main() {
-	server := flag.String("server", "", "update server base URL; overrides the window's setting for this run")
+	server := flag.String("server", "", "update server base URL, for testing; overrides the one built in")
 	channel := flag.String("channel", "stable", "release channel to follow")
 	interval := flag.Duration("interval", 0, "how often to check for updates; overrides the window's setting for this run")
 	confirmAfter := flag.Duration("confirm-after", 30*time.Second, "how long a new version must run before it is confirmed and the previous one is dropped")
@@ -62,10 +62,14 @@ func main() {
 	if err != nil {
 		log.Error("cannot find own executable; self-update disabled", "err", err)
 	} else {
-		store := newSettingsStore(install.StateDir(exe), serverOptions())
-		store.override(*server, int(interval.Seconds()))
-		up := newUpdater(store.serverURL(), *channel, log)
-		ui = newUIState(version, *channel, store.serverURL(), clientIDOf(up), exe)
+		store := newSettingsStore(install.StateDir(exe))
+		store.override(int(interval.Seconds()))
+		serverURL := updateServer()
+		if *server != "" {
+			serverURL = *server
+		}
+		up := newUpdater(serverURL, *channel, log)
+		ui = newUIState(version, *channel, serverURL, clientIDOf(up), exe)
 		ui.settings = store
 		afterUpdate = startupChecks(exe, *confirmAfter, ui, log)
 		if up != nil {
@@ -137,13 +141,11 @@ func newUpdater(server, channel string, log *slog.Logger) *updater.Client {
 // checkLoop checks once at startup and then every interval, with up to 20
 // percent of jitter so a fleet of clients does not hit the server in step.
 // Errors are logged and retried next time; they never stop the program.
-// Before every check it reads the current settings, so a server or
-// interval chosen in the window applies right away: changing a setting
-// also cuts the wait short.
+// After every check it reads the interval from the settings, so a new
+// choice in the window applies right away: changing it also cuts the wait
+// short.
 func checkLoop(ctx context.Context, up *updater.Client, exe string, store *settingsStore, ui *uiState, log *slog.Logger) {
 	for {
-		up.ServerURL = store.serverURL()
-		ui.setServer(up.ServerURL)
 		interval := max(time.Duration(store.get().IntervalSeconds)*time.Second, time.Second)
 		ui.setStatus("checking", "asking the server what the "+up.Channel+" channel offers")
 		if err := checkOnce(ctx, up, exe, ui, log); err != nil {

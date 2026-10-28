@@ -138,7 +138,7 @@ The client sends a flexible set of facts from day one (id, version, os, arch, ch
    - Windows: start the new process, then exit.
 10. **Post-swap health and rollback**: before the swap, record the new version in `update-state.json` as pending. On startup, if an update is pending, count the start; after two failed starts the third start rolls back to `.old` and records the version so it is never installed again. After running healthy for `--confirm-after` (default 30 s), clear the marker and delete `.old`. An update that arrives while another is unconfirmed waits.
 11. **Housekeeping**: on start, clean up stray temp files and a leftover `.bad` binary. A lock file stops two instances from updating at once; a lock older than ten minutes is treated as stale.
-12. **Flags**: `--server`, `--channel`, `--interval`, `--confirm-after`, `--ui`, `--open`, `--selftest`, `--version`.
+12. **Flags**: `--server`, `--channel`, `--interval`, `--confirm-after`, `--ui`, `--open`, `--headless`, `--selftest`, `--version`.
 13. **Window**: one embedded HTML page polling `/api/state`. Built with the `desktop` tag it is shown in a native Wails window and served in-process; without the tag it is served on `--ui` (default 127.0.0.1:4780) and opened in a browser. History is appended to `update-history.jsonl` next to the binary.
 
 ## Release tool
@@ -184,9 +184,11 @@ The client sends a flexible set of facts from day one (id, version, os, arch, ch
 
 The window is [Wails](https://wails.io), which shows a web page in a native window using the operating system's own web engine (WebKit on macOS, WebView2 on Windows) instead of bundling a browser, so the app stays around 10 MB. Wails is compiled in only with the `desktop` build tag. Without it, `go build ./cmd/app` is pure Go with no native toolchain, serves the same page on `127.0.0.1:4780` (loopback only, Host header checked) and opens a browser tab. The tests, the demo scripts and the Linux release use this build. A native window on Linux would need WebKitGTK and a recent glibc on every machine, and a server without them could never install an update.
 
-The page is one embedded HTML file that polls `/api/state` once a second. In the desktop build it is served from an HTTP handler inside the process, so no port is opened. The only two write endpoints, settings and clear history, accept only a JSON request, which a page on another site cannot send, and settings accept only the built-in choices.
+The page is one embedded HTML file that polls `/api/state` once a second. In the desktop build it is served from an HTTP handler inside the process, so no port is opened. The only two write endpoints, the check interval and clear history, accept only a JSON request, which a page on another site cannot send, and the interval must be one of the offered choices.
 
-Settings live in `settings.json`, and the update history in `update-history.jsonl`, in the state directory. That is beside the executable, except inside a macOS app bundle, where it is `~/Library/Application Support/relay`. Every file under `Relay.app/Contents` is covered by the bundle's signature, so the updater never leaves anything there except the executable itself. `--server` and `--interval` override the saved settings for one run and are never saved.
+Where updates come from is fixed when the app is built. Release builds have the cloud server compiled in (`release compile --cloud-server`), and a build without one, such as the demo, uses `http://localhost:8080`. There is deliberately no switch in the window: two servers that can each offer a version with the same number would be confusing, and a user who picked the wrong one would silently stop getting updates. `--server` overrides the address for one run, for testing.
+
+The check interval lives in `settings.json`, and the update history in `update-history.jsonl`, in the state directory. That is beside the executable, except inside a macOS app bundle, where it is `~/Library/Application Support/relay`. Every file under `Relay.app/Contents` is covered by the bundle's signature, so the updater never leaves anything there except the executable itself. `--interval` overrides the saved interval for one run and is never saved.
 
 **macOS bundles.** The updater replaces only `Relay.app/Contents/MacOS/relay`, so a release ships the bundle once, for first install, and every update after that is the bare binary, as on the other platforms. The bundle is ad-hoc signed, and its `Info.plist` and icon (`build/icon.icns`, committed so it never changes) are identical in every release. CI takes the update binary from inside that release's signed bundle, so it keeps any installed bundle's signature valid.
 
@@ -231,7 +233,7 @@ gcloud run deploy relay-updateserver --source . --region us-east1 --allow-unauth
 
 `run-env.yaml` holds `BASE_URL`, `RELEASES_DIR: /data`, `ADMIN_TOKEN` and `GITHUB_REPO`. After the first deploy, `.github/workflows/deploy.yml` redeploys on every push to `main` that touches the server. It signs in to Google with Workload Identity Federation, set up once by `scripts/setup-deploy-identity.sh`, so no cloud key is stored in GitHub. The operator page's client list is kept in memory per instance, which is why the service runs one instance.
 
-Release builds default the app to this server through `release compile --cloud-server <url>`. A local build has no cloud server and offers only This computer.
+Release builds get their updates from this server, compiled in through `release compile --cloud-server <url>`. A local build has no cloud server and uses one on the same computer.
 
 ## Shipping a release by hand
 

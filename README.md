@@ -66,9 +66,9 @@ chmod +x app-linux-amd64
 ./app-linux-amd64
 ```
 
-### Settings
+### How often it checks
 
-Click the gear at the bottom left of the window to choose where updates come from and how often Relay checks. Cloud, our live server, is the default. This computer uses an update server on port 8080 of your own machine. Relay checks every minute unless you change it.
+Relay checks for updates every minute. To change that, click "Checks every 1 min" at the bottom left of the window and pick from 10 seconds to 1 hour. Your choice is saved on your computer.
 
 ## Publishing a release
 
