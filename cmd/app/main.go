@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -148,7 +149,12 @@ func checkLoop(ctx context.Context, up *updater.Client, exe string, store *setti
 		if err := checkOnce(ctx, up, exe, ui, log); err != nil {
 			log.Error("update check failed", "err", err)
 			ui.setStatus("rejected", err.Error())
-			ui.record("rejected", err.Error())
+			// A release that fails its checks is recorded by the updater
+			// itself; this records everything else, such as the server
+			// being unreachable.
+			if !up.Recorded(err) {
+				ui.record("rejected", err.Error())
+			}
 		} else {
 			ui.setStatus("idle", "up to date")
 		}
@@ -171,9 +177,18 @@ func checkOnce(ctx context.Context, up *updater.Client, exe string, ui *uiState,
 	if err != nil || !ok {
 		return err
 	}
+	// A release that was rolled back, or that failed its checks too often
+	// in this run, is treated as no update, so it does not show as a
+	// failure on every check.
+	if st, err := install.LoadState(exe); (err == nil && st.Skips(m.Version)) || up.GaveUp(m) {
+		return nil
+	}
 	log.Info("update available", "new_version", m.Version)
 	ui.setStatus("updating", "installing v"+m.Version)
-	return up.Apply(ctx, m, exe)
+	if err := up.Apply(ctx, m, exe); !errors.Is(err, updater.ErrSkipped) {
+		return err
+	}
+	return nil
 }
 
 // clientIDOf is the ID the updater sends, or "" when there is no updater.

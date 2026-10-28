@@ -48,6 +48,8 @@ type Client struct {
 	// Notify, when set, is called at each step of an update so a UI can
 	// show progress. It must return quickly.
 	Notify func(step, detail string)
+
+	attempts map[string]int // failed attempts per release in this run, see Apply
 }
 
 // notify calls Notify if one is set.
@@ -155,10 +157,10 @@ func (c *Client) Download(ctx context.Context, m manifest.Manifest, dir string) 
 		err = closeErr
 	}
 	if err == nil && n != m.Size {
-		err = fmt.Errorf("updater: download: got %d bytes, manifest says %d", n, m.Size)
+		err = badRelease(fmt.Errorf("updater: download: got %d bytes, manifest says %d", n, m.Size))
 	}
 	if err == nil && hex.EncodeToString(hash.Sum(nil)) != m.SHA256 {
-		err = errors.New("updater: download: sha256 does not match manifest")
+		err = badRelease(errors.New("updater: download: sha256 does not match manifest"))
 	}
 	if err != nil {
 		os.Remove(path)
@@ -166,6 +168,17 @@ func (c *Client) Download(ctx context.Context, m manifest.Manifest, dir string) 
 	}
 	return path, nil
 }
+
+// badReleaseError marks a failure of what was offered rather than of the
+// connection: the downloaded bytes do not match the manifest's size or
+// hash, or the new binary fails its self-test. Only these count towards
+// giving up on a release; a dropped connection is simply retried.
+type badReleaseError struct{ err error }
+
+func (e *badReleaseError) Error() string { return e.err.Error() }
+func (e *badReleaseError) Unwrap() error { return e.err }
+
+func badRelease(err error) error { return &badReleaseError{err} }
 
 // CleanupTemp removes leftover partial downloads in dir from a previous run
 // that was interrupted.

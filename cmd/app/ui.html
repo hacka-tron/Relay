@@ -154,7 +154,7 @@
   // The page is a view of /api/state. The server side changes state in
   // milliseconds for a plain check, so the checking animation is held for
   // a couple of seconds whenever a new check is seen, so it is visible.
-  var lastCheck = null, holdUntil = 0, STEP_COLOR = { started: 'var(--green)', confirmed: 'var(--green)', available: 'var(--blue)', downloaded: 'var(--blue)', installed: 'var(--blue)', rejected: 'var(--red)', rolledback: 'var(--red)' };
+  var lastCheck = null, holdUntil = 0, STEP_COLOR = { started: 'var(--green)', confirmed: 'var(--green)', available: 'var(--blue)', downloaded: 'var(--blue)', installed: 'var(--blue)', rejected: 'var(--red)', rolledback: 'var(--red)', gaveup: 'var(--red)' };
   function el(id) { return document.getElementById(id); }
   function text(id, v) { el(id).textContent = v; }
   function fmt(t) { var d = new Date(t); return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); }
