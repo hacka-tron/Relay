@@ -1,0 +1,32 @@
+# Tag a commit v1.2.0 and push the tag: this builds, signs and publishes
+# the release. The signing key lives only in the UPDATER_SIGNING_KEY
+# repository secret (the one line content of signing.key).
+name: release
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: go test ./...
+      - name: build and sign
+        env:
+          UPDATER_SIGNING_KEY: ${{ secrets.UPDATER_SIGNING_KEY }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          go run ./cmd/release build --version "$VERSION"
+      - name: publish to GitHub Releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          gh release create "$GITHUB_REF_NAME" releases/"$VERSION"/* --title "v$VERSION" --generate-notes

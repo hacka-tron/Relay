@@ -48,5 +48,8 @@ func (c *Client) Apply(ctx context.Context, m manifest.Manifest, exe string) err
 		return err
 	}
 	c.Log.Info("installed, restarting", "new_version", m.Version)
+	// Restart replaces this process, so deferred calls never run; release
+	// the lock by hand first or the new version would find it held.
+	unlock()
 	return install.Restart(exe)
 }

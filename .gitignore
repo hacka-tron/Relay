@@ -10,3 +10,4 @@ releases/*
 pending-update.json
 .worktrees/
 .DS_Store
+/demo/

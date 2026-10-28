@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -52,7 +53,7 @@ func TestSwapReplacesAndKeepsOld(t *testing.T) {
 	if _, err := os.Stat(nb); !os.IsNotExist(err) {
 		t.Fatal("temp download still exists after swap")
 	}
-	if info, _ := os.Stat(exe); info.Mode().Perm()&0o100 == 0 {
+	if info, _ := os.Stat(exe); runtime.GOOS != "windows" && info.Mode().Perm()&0o100 == 0 {
 		t.Fatal("new program is not executable")
 	}
 }
@@ -152,11 +153,21 @@ func TestStartupWithoutStateIsNoop(t *testing.T) {
 }
 
 func TestSelfTest(t *testing.T) {
+	// Copy the test binary to a non executable file, as a download would be.
 	self, _ := os.Executable()
-	t.Setenv("INSTALL_TEST_VERSION", "1.2.0")
-	if err := SelfTest(self, "1.2.0"); err != nil {
+	b, err := os.ReadFile(self)
+	if err != nil {
 		t.Fatal(err)
 	}
+	path := filepath.Join(t.TempDir(), "update-1.tmp")
+	if err := os.WriteFile(path, b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("INSTALL_TEST_VERSION", "1.2.0")
+	if err := SelfTest(path, "1.2.0"); err != nil {
+		t.Fatal(err)
+	}
+	self = path
 	if err := SelfTest(self, "9.9.9"); err == nil {
 		t.Fatal("wrong version passed self-test")
 	}

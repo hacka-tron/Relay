@@ -84,8 +84,12 @@ func (s State) Save(exe string) error {
 
 // SelfTest runs the new binary with --selftest and requires it to exit 0
 // and print exactly wantVersion within 10 seconds. It catches a build that
-// cannot even start, before that build replaces anything.
+// cannot even start, before that build replaces anything. Downloads are
+// written without execute permission, so this is where it is granted.
 func SelfTest(path, wantVersion string) error {
+	if err := os.Chmod(path, 0o755); err != nil {
+		return err
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	out, err := exec.CommandContext(ctx, path, "--selftest").Output()

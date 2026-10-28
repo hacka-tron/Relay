@@ -1,0 +1,153 @@
+# Relay: a program that updates itself
+
+Relay is a small long-running program that keeps itself up to date. When a new version is published, every running copy downloads it, checks that it was really published by us, proves the new binary starts, swaps it into place and restarts, all without anyone touching the machine. If the new version keeps crashing, the program puts the old one back.
+
+It is written in Go, builds to one static binary per platform, and runs on Linux, macOS and Windows. The repository also holds the update server and the release tool, because a self-updating program is only half of the system.
+
+## Try it in one command
+
+You need Go 1.26 or newer.
+
+```sh
+make demo          # macOS or Linux
+.\scripts\demo.ps1 # Windows
+```
+
+The demo generates a signing key, builds and signs v1.0.0 and v1.1.0, starts the update server, starts the app at v1.0.0, promotes v1.1.0 and shows the app restarting as v1.1.0 under the same PID. It then publishes a v1.2.0 whose bytes were altered after signing and shows the app refusing it. Everything it creates lives in `./demo`.
+
+## How it fits together
+
+```
+ developer / CI                   update server                    client machine
+ --------------                   -------------                    --------------
+ release build                    updateserver                     app
+   compile 5 targets   upload       GET /v1/update?...  <-- check -- on start, then every N minutes
+   sha256 each         ------->     decide by channel,  --- 200 --> verify signature (key compiled in)
+   sign each                        percent, paused                 download to temp, check size + sha256
+   write release.json                                               run new binary --selftest
+                                    GET /files/...      <-- fetch -- swap atomically, keep .old
+ release promote                                                    restart; roll back if it crash loops
+   edit rollout.json
+```
+
+| Path | What it is |
+|---|---|
+| `cmd/app` | The program. Prints `hello from vX.Y.Z` every few seconds and runs the update loop. |
+| `cmd/updateserver` | HTTP server: `/v1/update` decides what to offer, `/files/` serves binaries. |
+| `cmd/release` | `keygen`, `build` (cross compile, hash, sign), `promote` (edit `rollout.json`). |
+| `internal/manifest` | The signed description of one binary, and `Sign` / `Verify`. |
+| `internal/rollout` | Pure decision logic: channel, percent, pause, never downgrade. |
+| `internal/updater` | Client side: check, download with limits, verify, apply. |
+| `internal/install` | Swap, rollback, self-test, crash-loop detection. Per-OS pieces behind build tags. |
+
+## Trust: who can ship an update
+
+Every release is signed with an Ed25519 private key that exists only on the release machine or in the CI secret. The matching public key is compiled into the app. The update server and the file storage never see the private key. So if the server, the storage or the network between them is compromised, an attacker can stop updates from arriving but cannot make a client install anything of their own.
+
+What is signed is not the JSON manifest but a short fixed text:
+
+```
+updater-release-v1
+version=1.2.0
+os=linux
+arch=amd64
+sha256=<hex of the binary>
+```
+
+Signing a fixed text avoids every question about JSON key order or whitespace. Binding the version in means an old, genuinely signed binary cannot be replayed as a newer one. Binding os and arch in means a signed Windows build cannot be served to a Linux client. The client checks, in this order, before installing anything:
+
+1. the signature is valid for the compiled-in public key
+2. the manifest is for this machine's os and arch
+3. the version is strictly newer than the running one (semver), so no downgrades
+4. the download URL is http or https and the declared size is within the limit
+5. after downloading, the byte count and SHA-256 match the manifest exactly
+6. the new binary runs `--selftest`, exits 0 and prints its version within 10 seconds
+
+Only then is the binary swapped in.
+
+## Reliability: what happens when things go wrong
+
+- **Interrupted download.** It goes to a temp file next to the executable and is deleted on any mismatch. Leftover temp files are cleaned on the next start.
+- **Crash during the swap.** The last step is a single `rename`, which the OS makes atomic, so the executable path always holds either the complete old program or the complete new one.
+- **The new version will not start.** The self-test catches this before the swap. If a version passes the self-test but then crashes repeatedly, the start counter in `update-state.json` notices: after two failed starts the third start rolls back to the `.old` binary and records the version so it is never offered again on that machine. After 30 seconds of healthy running the update is confirmed and `.old` is deleted.
+- **Two copies updating at once.** A lock file next to the executable prevents it. A lock older than ten minutes is treated as left by a crash.
+- **Server unreachable, bad response, bad manifest.** Logged and retried at the next interval. The program never exits because of the updater.
+- **Fleet polling.** Each check is jittered by up to 20 percent of the interval so clients do not line up.
+- **Operator kill switch.** `paused: true` in `rollout.json` makes the server answer "nothing for you" to everyone, effective on the next request with no restart.
+
+### Per-OS details
+
+- **Linux and macOS.** The running program is copied to `app.old`, then the new file is renamed over `app`. The program then `exec`s itself, keeping the same PID, arguments and environment.
+- **Windows.** A running executable cannot be overwritten or deleted, but it can be renamed. So `app.exe` is renamed to `app.exe.old`, the new file is renamed to `app.exe`, a new process is started and the old one exits. A rolled-back binary is renamed to `.bad` and deleted on the next start, for the same reason.
+
+## The update server
+
+```
+GET /v1/update?client_id=<id>&version=<current>&os=<goos>&arch=<goarch>&channel=<stable|beta>
+  204  nothing to do
+  200  {"version":"1.2.0","os":"linux","arch":"amd64","url":"...","sha256":"...","size":123,"signature":"..."}
+GET /files/<version>/<binary>
+GET /healthz
+```
+
+The server reads `releases/rollout.json` on every request:
+
+```json
+{
+  "channels": {
+    "stable": { "version": "1.1.0", "rollout_percent": 100, "paused": false },
+    "beta":   { "version": "1.2.0", "rollout_percent": 25,  "paused": false }
+  }
+}
+```
+
+A client is inside a percentage rollout when `fnv32(client_id + version) % 100 < rollout_percent`. The hash is deterministic, so a client does not flip in and out of a rollout between checks, and it includes the version so each release reshuffles who goes first. The server never offers a version that is not strictly newer than what the client reports. All decision logic is in `internal/rollout`, which has no I/O, so new rules (by OS, by an allowlist of client IDs, a minimum required version) are one more `if` plus a test.
+
+Client facts are sent on every check from day one, so most new server-side rules need no client change.
+
+Binaries are served from the `releases/` directory by the same process. `release.json` stores just a file name and the server prefixes its own `/files/<version>/` path. If `release.json` holds an absolute URL instead, the server passes it through unchanged, so moving binaries to object storage or GitHub Releases is a change to the release tool only.
+
+## Shipping a release
+
+```sh
+go run ./cmd/release keygen                      # once; commit pubkey.txt, never signing.key
+go run ./cmd/release build --version 1.2.0       # releases/1.2.0/{app-*, release.json}
+go run ./cmd/release promote --version 1.2.0 --channel beta --percent 10
+go run ./cmd/release promote --version 1.2.0     # stable, 100 percent
+go run ./cmd/release promote --version 1.2.0 --paused   # kill switch
+```
+
+Building and promoting are separate on purpose: a build can sit in `releases/` for as long as you like before any client hears about it.
+
+In CI, pushing a tag such as `v1.2.0` runs `.github/workflows/release.yml`, which tests, builds and signs with the `UPDATER_SIGNING_KEY` repository secret (the one line content of `signing.key`), and uploads the binaries and `release.json` to a GitHub Release. The workflow calls the same `release build` a developer runs locally.
+
+## Assumptions
+
+The brief left some things open. These are the answers the design assumes.
+
+1. **What kind of program is it?** A long-running agent or daemon. Updates are applied silently. For an interactive app the same code would gain a prompt-before-restart mode; for managed fleets, operator pinning.
+2. **Who runs it?** End-user machines we do not control, possibly offline for long stretches. Hence the retry-forever loop and the strictness about never leaving a broken install behind.
+3. **OS code signing and notarization?** Out of scope: Gatekeeper and SmartScreen need paid certificates. Our own signatures cover update integrity; OS signing would be added at build time in `release build`.
+4. **Package managers?** Out of scope. A copy installed by brew, apt or winget should defer to that manager; the natural hook is a build-time flag that disables the updater.
+5. **Rollback?** Required, and automatic.
+6. **Hosting?** The server runs locally for the demo. It is a stateless binary reading a directory, so it deploys unchanged to Cloud Run, Fly.io or a container anywhere (`Dockerfile`), with the `releases/` directory synced from object storage. Serve binaries from a CDN at scale.
+
+## Threat model and limits
+
+- Transport is plain HTTP in the demo. Production must use HTTPS; signatures protect integrity either way, HTTPS additionally hides which clients run which versions.
+- A compromised server can withhold updates or keep serving an old release. It cannot forge one. Preventing an indefinite freeze would need signed, expiring manifests as in TUF, which is noted as future work.
+- The private key is a single point of trust. Rotation would ship a list of trusted public keys in the client and sign new releases with the new key while old clients still accept the old one.
+- Download size is capped, every network call has a timeout, and the server refuses to serve anything outside `releases/<version>/<file>`.
+
+## Out of scope
+
+OS code signing, delta updates, a prompt-before-restart UI, enterprise approval windows, an admin UI or authentication for editing `rollout.json`, and a full TUF implementation.
+
+## Development
+
+```sh
+make check   # gofmt, go vet, go build
+make test    # go test ./...
+```
+
+The only dependency outside the standard library is `golang.org/x/mod/semver`.
