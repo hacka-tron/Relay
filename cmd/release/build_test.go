@@ -107,6 +107,19 @@ func TestCompileThenSign(t *testing.T) {
 	}
 }
 
+func TestCheckServerURL(t *testing.T) {
+	for _, ok := range []string{"", "https://relay.example.run.app", "https://x.example/"} {
+		if err := checkServerURL(ok); err != nil {
+			t.Errorf("rejected %q: %v", ok, err)
+		}
+	}
+	for _, bad := range []string{"http://plain.example", "https://", "https://a b", "relay.example", "https://x.example/path", "https://u:p@x.example", "https://x.example?a=1", "https://x.example#f"} {
+		if checkServerURL(bad) == nil {
+			t.Errorf("accepted %q", bad)
+		}
+	}
+}
+
 func TestParseBinaryName(t *testing.T) {
 	cases := map[string]bool{
 		"app-linux-amd64": true, "app-windows-amd64.exe": true, "app-darwin-arm64": true,

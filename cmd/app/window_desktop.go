@@ -33,7 +33,7 @@ func showWindow(ctx context.Context, ui *uiState, opts windowOptions, log *slog.
 	err := wails.Run(&options.App{
 		Title:            "Relay",
 		Width:            440,
-		Height:           780,
+		Height:           900,
 		MinWidth:         360,
 		MinHeight:        560,
 		BackgroundColour: &options.RGBA{R: 234, G: 242, B: 251, A: 255},

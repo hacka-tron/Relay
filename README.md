@@ -32,7 +32,14 @@ The builds are not signed with an Apple or Microsoft certificate (that needs pai
 
 Linux keeps the browser page on purpose: a native window there needs WebKitGTK and a recent glibc on every machine, and a server without them could never install an update. Every build accepts `--headless` to run as a background agent with no window or page at all.
 
-The window shows the running version, a countdown to the next check, and a history of every update step (available, downloaded, installed, confirmed, rejected, rolled back). A character reacts to what the updater is doing: resting while idle, pinging with its antenna during a check, hopping while an update installs, and wincing when a download is refused. The history lives in `update-history.jsonl` so it survives the restart that every update causes. It and the updater's state file sit beside the executable, except in the macOS app, where they go to `~/Library/Application Support/relay` so the signed bundle is never modified apart from the executable itself.
+**Settings.** At the bottom of the window are two settings, saved in `settings.json` beside the update state, so they survive restarts and updates:
+
+- **Update server:** Cloud (the deployed server, built into release builds; its address is not shown in the window) or This computer (`http://localhost:8080`, for demos and development). Release builds start on Cloud.
+- **Check every:** 10 seconds up to 1 hour. Default 1 minute.
+
+A change triggers a check straight away, without a restart. Starting the app with `--server` or `--interval` overrides the saved setting for that run only (an address given with `--server` appears as a third choice, Custom, and is never saved). The page can only save the built-in choices, and only with a JSON request, which a page on another site cannot send to it.
+
+The window shows the running version, a countdown to the next check, and a history of every update step (available, downloaded, installed, confirmed, rejected, rolled back). A character reacts to what the updater is doing: resting while idle, pinging with its antenna during a check, hopping while an update installs, and wincing when a download is refused. The Clear button empties the history. The history lives in `update-history.jsonl` so it survives the restart that every update causes. It and the updater's state file sit beside the executable, except in the macOS app, where they go to `~/Library/Application Support/relay` so the signed bundle is never modified apart from the executable itself.
 
 **How it is built.** The window is [Wails](https://wails.io), which shows a web page in a native window using the operating system's own web engine (WebKit on macOS and Linux, WebView2 on Windows) rather than bundling a browser, so the app stays around 10 MB. It is compiled in only with the `desktop` build tag. The page is one embedded HTML file, and the window serves it from an HTTP handler inside the process, so no network port is opened.
 
@@ -144,6 +151,7 @@ With `ADMIN_TOKEN` set (16 characters or more), the server also serves `/admin` 
 go run ./cmd/release keygen                      # once; commit pubkey.txt, never signing.key
 go run ./cmd/release build --version 1.2.0       # releases/1.2.0/{app-*, release.json}
 go run ./cmd/release build --version 1.2.0 --desktop --targets darwin/arm64   # with the native window
+go run ./cmd/release build --version 1.2.0 --cloud-server https://updates.example.com   # default the app to a deployed server
 go run ./cmd/release promote --version 1.2.0 --channel beta --percent 10
 go run ./cmd/release promote --version 1.2.0     # stable, 100 percent
 go run ./cmd/release promote --version 1.2.0 --paused   # kill switch

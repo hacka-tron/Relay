@@ -5,6 +5,7 @@ import (
 	"bytes"
 	_ "embed"
 	"encoding/json"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -47,6 +48,7 @@ type uiState struct {
 	NextCheck   time.Time `json:"next_check"`
 	History     []Event   `json:"history"`
 	historyPath string
+	settings    *settingsStore // nil when there is nothing to configure
 }
 
 const maxHistory = 200
@@ -63,6 +65,12 @@ func (s *uiState) setStatus(status, note string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.Status, s.StatusNote = status, note
+}
+
+func (s *uiState) setServer(url string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.Server = url
 }
 
 func (s *uiState) setChecked(next time.Time) {
@@ -85,11 +93,37 @@ func (s *uiState) record(step, detail string) {
 	if len(s.History) > maxHistory {
 		s.History = s.History[:maxHistory]
 	}
-	s.mu.Unlock()
+	// Written under the lock so a Clear cannot land between the two steps.
 	if f, err := os.OpenFile(s.historyPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644); err == nil {
 		json.NewEncoder(f).Encode(ev)
 		f.Close()
 	}
+	s.mu.Unlock()
+}
+
+// clearHistory empties the list and the file.
+func (s *uiState) clearHistory() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.History = nil
+	if err := os.Remove(s.historyPath); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
+}
+
+// handleClearHistory is the page's Clear button. Like settings, it only
+// accepts a JSON request, so another site cannot trigger it.
+func (s *uiState) handleClearHistory(w http.ResponseWriter, r *http.Request) {
+	if r.Header.Get("Content-Type") != "application/json" {
+		http.Error(w, "want application/json", http.StatusUnsupportedMediaType)
+		return
+	}
+	if err := s.clearHistory(); err != nil {
+		http.Error(w, "could not clear history", http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // loadHistory reads the file newest first, keeping the last maxHistory.
@@ -123,12 +157,53 @@ func loadHistory(path string) []Event {
 	return all
 }
 
+// stateResponse is what /api/state returns: the window state plus the
+// settings and the choices the page can offer.
+type stateResponse struct {
+	*uiState
+	Settings  *settings      `json:"settings,omitempty"`
+	Servers   []serverOption `json:"servers,omitempty"`
+	Intervals []int          `json:"intervals,omitempty"`
+}
+
 func (s *uiState) handleState(w http.ResponseWriter, r *http.Request) {
+	resp := stateResponse{uiState: s}
+	if s.settings != nil {
+		cur := s.settings.get()
+		s.settings.mu.Lock()
+		resp.Servers = append([]serverOption(nil), s.settings.options...)
+		s.settings.mu.Unlock()
+		resp.Settings, resp.Intervals = &cur, intervalChoices
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
-	json.NewEncoder(w).Encode(s)
+	json.NewEncoder(w).Encode(resp)
+}
+
+// handleSettings saves new settings from the page. Requiring a JSON body
+// means a page on another site cannot post here: a browser will not send a
+// cross-site JSON request without asking first, and nothing here says yes.
+func (s *uiState) handleSettings(w http.ResponseWriter, r *http.Request) {
+	if s.settings == nil {
+		http.NotFound(w, r)
+		return
+	}
+	if r.Header.Get("Content-Type") != "application/json" {
+		http.Error(w, "want application/json", http.StatusUnsupportedMediaType)
+		return
+	}
+	var v settingsChange
+	if err := json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&v); err != nil {
+		http.Error(w, "bad settings", http.StatusBadRequest)
+		return
+	}
+	if err := s.settings.set(v); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // serveUI starts the local page and returns its URL, or "" if it could not
@@ -168,6 +243,8 @@ func (s *uiState) handler() http.Handler {
 		w.Write(uiHTML)
 	})
 	mux.HandleFunc("GET /api/state", s.handleState)
+	mux.HandleFunc("POST /api/settings", s.handleSettings)
+	mux.HandleFunc("POST /api/history/clear", s.handleClearHistory)
 	return mux
 }
 
