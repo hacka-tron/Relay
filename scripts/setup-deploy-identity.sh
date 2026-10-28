@@ -19,10 +19,22 @@ gcloud iam service-accounts describe "$SA" --project "$PROJECT" >/dev/null 2>&1 
 # Roles for deploying from source: build with Cloud Build, push to Artifact
 # Registry, upload the source tarball, create the revision, and run it as
 # the service's runtime account.
+# A new service account takes a few seconds to become visible to IAM, so
+# each binding is retried until it sticks.
+bind() {
+  local n
+  for n in 1 2 3 4 5 6 7 8 9 10 11 12; do
+    gcloud projects add-iam-policy-binding "$PROJECT" --member "serviceAccount:$SA" --role "$1" --quiet >/dev/null 2>&1 && return 0
+    sleep 5
+  done
+  echo "could not grant $1 to $SA" >&2
+  return 1
+}
 for role in roles/run.admin roles/cloudbuild.builds.editor roles/artifactregistry.writer \
             roles/storage.admin roles/iam.serviceAccountUser roles/serviceusage.serviceUsageConsumer \
             roles/logging.viewer; do
-  gcloud projects add-iam-policy-binding "$PROJECT" --member "serviceAccount:$SA" --role "$role" --quiet >/dev/null
+  echo "granting $role"
+  bind "$role"
 done
 
 gcloud iam workload-identity-pools describe github --location global --project "$PROJECT" >/dev/null 2>&1 ||
