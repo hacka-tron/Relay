@@ -23,7 +23,7 @@ func TestOffersNewerVersion(t *testing.T) {
 }
 
 func TestNeverOffersSameOrOlderVersion(t *testing.T) {
-	for _, current := range []string{"1.1.0", "1.2.0", "2.0.0", "1.1.1-rc1"} {
+	for _, current := range []string{"1.1.0", "1.2.0", "2.0.0", "1.1.1-rc1", "v1.1.0", "v2.0.0"} {
 		if v, ok := Decide(facts(current), stableAt("1.1.0", 100)); ok {
 			t.Errorf("client on %s was offered %s", current, v)
 		}

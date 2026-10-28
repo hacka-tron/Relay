@@ -13,13 +13,13 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"flag"
 	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -38,23 +38,31 @@ func main() {
 		Addr:              *addr,
 		Handler:           newHandler(store{dir: *dir}, *baseURL, logger),
 		ReadHeaderTimeout: 5 * time.Second,
+		IdleTimeout:       60 * time.Second,
+		// No WriteTimeout on purpose: binary downloads on slow links can
+		// legitimately take minutes.
 	}
 
-	// Stop cleanly on Ctrl-C or SIGTERM (what Cloud Run and Docker send):
-	// finish in-flight requests, then exit.
+	// Serve in the background; the main goroutine waits for Ctrl-C or
+	// SIGTERM (what Cloud Run and Docker send), then drains in-flight
+	// requests for up to 10 seconds before exiting.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	go func() {
-		<-ctx.Done()
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		srv.Shutdown(shutdownCtx)
-	}()
-
+	errc := make(chan error, 1)
+	go func() { errc <- srv.ListenAndServe() }()
 	logger.Info("listening", "addr", *addr, "releases", *dir, "base_url", *baseURL)
-	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+
+	select {
+	case err := <-errc:
 		logger.Error("server stopped", "err", err)
 		os.Exit(1)
+	case <-ctx.Done():
+		logger.Info("shutting down")
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := srv.Shutdown(shutdownCtx); err != nil {
+			logger.Error("shutdown", "err", err)
+		}
 	}
 }
 
@@ -75,7 +83,7 @@ func newHandler(s store, baseURL string, log *slog.Logger) http.Handler {
 	h := &handler{store: s, baseURL: strings.TrimRight(baseURL, "/"), log: log}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/update", h.update)
-	mux.Handle("GET /files/", http.StripPrefix("/files/", noDirListing(http.FileServer(http.Dir(s.dir)))))
+	mux.HandleFunc("GET /files/{version}/{name}", h.file)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("ok\n"))
 	})
@@ -99,6 +107,10 @@ func (h *handler) update(w http.ResponseWriter, r *http.Request) {
 	}
 	if f.ClientID == "" || f.Version == "" || f.OS == "" || f.Arch == "" {
 		http.Error(w, "client_id, version, os and arch are required", http.StatusBadRequest)
+		return
+	}
+	if len(f.ClientID) > 128 {
+		http.Error(w, "client_id too long", http.StatusBadRequest)
 		return
 	}
 	log := h.log.With("client_id", f.ClientID, "version", f.Version, "os", f.OS, "arch", f.Arch, "channel", f.Channel)
@@ -127,6 +139,13 @@ func (h *handler) update(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
+	// Guard against a release.json that was copied into the wrong folder:
+	// never hand out a manifest for a version other than the one chosen.
+	if m.Version != target {
+		log.Error("release.json version mismatch", "target", target, "manifest_version", m.Version)
+		http.Error(w, "release unavailable", http.StatusInternalServerError)
+		return
+	}
 	m.URL = h.absoluteURL(target, m.URL)
 
 	log.Info("offer", "target", target, "url", m.URL)
@@ -146,14 +165,25 @@ func (h *handler) absoluteURL(version, stored string) string {
 	return h.baseURL + "/files/" + version + "/" + stored
 }
 
-// noDirListing serves files but answers 404 for directories, so the
-// releases tree cannot be browsed.
-func noDirListing(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasSuffix(r.URL.Path, "/") || r.URL.Path == "" {
-			http.NotFound(w, r)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
+// file serves exactly releases/<version>/<name>. Only that shape is
+// reachable, so rollout.json, release.json files and anything else in the
+// releases tree are not downloadable, and there is no directory listing.
+func (h *handler) file(w http.ResponseWriter, r *http.Request) {
+	version, name := r.PathValue("version"), r.PathValue("name")
+	if !safeSegment(version) || !safeSegment(name) || strings.HasSuffix(name, ".json") {
+		http.NotFound(w, r)
+		return
+	}
+	path := filepath.Join(h.store.dir, version, name)
+	if info, err := os.Stat(path); err != nil || info.IsDir() {
+		http.NotFound(w, r)
+		return
+	}
+	http.ServeFile(w, r, path)
+}
+
+// safeSegment accepts one plain path element: no separators, not hidden,
+// not "." or "..".
+func safeSegment(s string) bool {
+	return s != "" && !strings.HasPrefix(s, ".") && !strings.ContainsAny(s, `/\`)
 }

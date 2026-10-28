@@ -5,6 +5,7 @@ package rollout
 
 import (
 	"hash/fnv"
+	"strings"
 
 	"golang.org/x/mod/semver"
 )
@@ -58,11 +59,16 @@ func Decide(f Facts, cfg Config) (string, bool) {
 
 // isNewer reports whether target is strictly greater than current by
 // semver. Versions are stored without the leading v that the semver
-// package wants, so it is added here. An unparseable current version
-// compares as lower than any valid one, so a client with a corrupt
-// version string is still offered the update.
+// package wants, so it is added here (after removing one if a client sent
+// it). An unparseable current version compares as lower than any valid
+// one, so a client with a corrupt version string is still offered the
+// update rather than being stranded.
 func isNewer(target, current string) bool {
-	return semver.Compare("v"+target, "v"+current) > 0
+	return semver.Compare(canon(target), canon(current)) > 0
+}
+
+func canon(v string) string {
+	return "v" + strings.TrimPrefix(v, "v")
 }
 
 // inRollout buckets a client into 0..99 by hashing its ID together with the

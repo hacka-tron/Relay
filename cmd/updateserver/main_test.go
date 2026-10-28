@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/hacka-tron/relay/internal/manifest"
@@ -147,17 +148,42 @@ func TestConfigErrorsAre500(t *testing.T) {
 	}
 }
 
-func TestFilesDoesNotListDirectories(t *testing.T) {
-	srv, _ := newTestServer(t, stable110)
-	for _, p := range []string{"/files/", "/files/1.1.0/"} {
+func TestFilesServesOnlyVersionedBinaries(t *testing.T) {
+	srv, dir := newTestServer(t, stable110)
+	os.WriteFile(filepath.Join(dir, "1.1.0", ".hidden"), []byte("x"), 0o644)
+	os.WriteFile(filepath.Join(dir, "signing.key"), []byte("x"), 0o644)
+	for _, p := range []string{
+		"/files/", "/files/1.1.0/", "/files/1.1.0", // listings and bare dirs
+		"/files/rollout.json", "/files/1.1.0/release.json", // config files
+		"/files/1.1.0/.hidden", "/files/./signing.key", "/files/../signing.key", // hidden and traversal
+		"/files/..%2f/signing.key", "/files/%2e%2e/signing.key",
+	} {
 		resp, _ := get(t, srv.URL+p)
-		if resp.StatusCode != 404 {
-			t.Fatalf("%s: %d, want 404", p, resp.StatusCode)
+		if resp.StatusCode == 200 {
+			t.Errorf("%s was served", p)
 		}
 	}
-	resp, _ := get(t, srv.URL+"/files/../rollout.json")
-	if resp.StatusCode == 200 {
-		t.Fatal("path traversal above /files/ served a file")
+}
+
+func TestUpdateRejectsMismatchedReleaseFile(t *testing.T) {
+	srv, dir := newTestServer(t, stable110)
+	// Simulate a 1.0.0 release.json copied into the 1.1.0 folder.
+	rel := manifest.Release{Version: "1.0.0", Targets: []manifest.Manifest{
+		{Version: "1.0.0", OS: "linux", Arch: "amd64", URL: "app", SHA256: "ab", Size: 1, Signature: "s"},
+	}}
+	b, _ := json.Marshal(rel)
+	os.WriteFile(filepath.Join(dir, "1.1.0", "release.json"), b, 0o644)
+	resp, _ := get(t, srv.URL+"/v1/update?client_id=c1&version=1.0.0&os=linux&arch=amd64")
+	if resp.StatusCode != 500 {
+		t.Fatalf("status %d, want 500", resp.StatusCode)
+	}
+}
+
+func TestUpdateRejectsOverlongClientID(t *testing.T) {
+	srv, _ := newTestServer(t, stable110)
+	resp, _ := get(t, srv.URL+"/v1/update?client_id="+strings.Repeat("a", 129)+"&version=1.0.0&os=linux&arch=amd64")
+	if resp.StatusCode != 400 {
+		t.Fatalf("status %d, want 400", resp.StatusCode)
 	}
 }
 
