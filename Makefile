@@ -1,4 +1,4 @@
-.PHONY: test check fmt demo keygen build fetch server
+.PHONY: test check fmt demo next bad keygen build fetch server
 
 test:
 	go test ./...
@@ -11,8 +11,15 @@ check:
 fmt:
 	gofmt -w .
 
+# The local demo: start it, then publish versions from another terminal.
 demo:
-	./scripts/demo.sh
+	go run ./cmd/demo start
+
+next:
+	go run ./cmd/demo next
+
+bad:
+	go run ./cmd/demo bad
 
 keygen:
 	go run ./cmd/release keygen

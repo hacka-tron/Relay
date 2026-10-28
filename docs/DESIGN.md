@@ -109,7 +109,8 @@ The client sends a flexible set of facts from day one (id, version, os, arch, ch
 │   ├── install/        # swap, rollback, self-test, crash-loop state; per-OS files via build tags
 │   └── atomicfile/     # write-then-rename helper
 ├── releases/           # gitignored except rollout.json
-├── scripts/            # demo.sh and demo.ps1
+├── cmd/demo/           # local demo: start, next, bad (also run by CI on every OS)
+├── scripts/            # macOS bundle, icon, one-time cloud setup
 ├── .github/workflows/  # ci.yml (3 OS test matrix), release.yml (tag push builds and publishes)
 ├── Dockerfile          # for the server
 └── Makefile
