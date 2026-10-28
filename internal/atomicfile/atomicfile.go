@@ -3,25 +3,24 @@
 package atomicfile
 
 import (
+	"crypto/rand"
 	"os"
-	"path/filepath"
 )
 
-// Write writes data to a temp file in the same directory and renames it
-// over path. Rename is atomic on every supported OS, so a crash midway
-// leaves the previous file intact.
+// Write writes data to a temp file beside path and renames it over path.
+// Rename is atomic on every supported OS, so a crash midway leaves the
+// previous file intact. The temp file is created with the final mode
+// rather than changed afterwards, because some mounted filesystems (the
+// Cloud Storage volume used in deployment, for one) refuse chmod.
 func Write(path string, data []byte, perm os.FileMode) error {
-	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*")
+	name := path + ".tmp-" + rand.Text()
+	f, err := os.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, perm)
 	if err != nil {
 		return err
 	}
-	name := tmp.Name()
-	_, err = tmp.Write(data)
-	if closeErr := tmp.Close(); err == nil {
+	_, err = f.Write(data)
+	if closeErr := f.Close(); err == nil {
 		err = closeErr
-	}
-	if err == nil {
-		err = os.Chmod(name, perm)
 	}
 	if err == nil {
 		err = os.Rename(name, path)

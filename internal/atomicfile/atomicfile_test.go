@@ -3,8 +3,11 @@ package atomicfile
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
+
+func isWindows() bool { return runtime.GOOS == "windows" }
 
 func TestWriteReplacesAndLeavesNoTemp(t *testing.T) {
 	dir := t.TempDir()
@@ -22,5 +25,15 @@ func TestWriteReplacesAndLeavesNoTemp(t *testing.T) {
 	entries, _ := os.ReadDir(dir)
 	if len(entries) != 1 {
 		t.Fatalf("leftover files: %v", entries)
+	}
+}
+
+func TestWriteUsesRequestedMode(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "k")
+	if err := Write(path, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if info, _ := os.Stat(path); info.Mode().Perm() != 0o600 && !isWindows() {
+		t.Fatalf("mode %o", info.Mode().Perm())
 	}
 }
