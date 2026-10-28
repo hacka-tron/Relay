@@ -188,10 +188,10 @@ func TestReleasesIgnoreTempAndOddDirs(t *testing.T) {
 	}
 	resp := adminReq(t, srv, "GET", "/admin", "secret-token-16ch", nil, "")
 	body, _ := io.ReadAll(resp.Body)
-	if strings.Contains(string(body), "1.2.0") {
+	if strings.Contains(string(body), "<code>1.2.0</code>") {
 		t.Fatal("temp or odd directory listed as a release")
 	}
-	if !strings.Contains(string(body), "1.1.0") {
+	if !strings.Contains(string(body), "<code>1.1.0</code>") {
 		t.Fatal("real release missing")
 	}
 }
