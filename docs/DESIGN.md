@@ -19,13 +19,13 @@ Write a program that updates itself. Deployed copies should be seamlessly replac
 
 ## Assumed answers to open questions
 
-1. **What kind of program?** A long-running background program (agent or daemon). Updates are silent and applied automatically. It runs under a supervisor that restarts it if it exits.
+1. **What kind of program?** A long-running program, either a desktop app or a background agent (`--headless`). Updates are silent and applied automatically. Crash-loop rollback relies on the program being started again after a crash, by the user or by a supervisor such as systemd, launchd or a Windows service. Without that, a crashing version simply stays down until the next launch, which then rolls it back.
 2. **Who are the clients?** End-user machines we do not control, possibly offline for long periods.
 3. **Silent or prompted?** Silent for this program. A prompt-to-restart mode for interactive apps and operator-controlled pinning for enterprise are natural extensions.
 4. **Code signing for Gatekeeper and SmartScreen?** Out of scope (needs paid certificates). Our own Ed25519 signatures cover update integrity.
 5. **Package managers (brew, apt, winget)?** Out of scope. If installed by a package manager, the app should defer to it.
 6. **Rollback?** Yes, assumed required.
-7. **Server hosting?** Runs locally for the demo. Production: server on Cloud Run, Fly.io or similar, binaries on S3 plus CloudFront or GitHub Releases.
+7. **Server hosting?** Runs locally for the demo, and is deployed to Cloud Run (see Hosting below). At scale, binaries would move to a CDN or GitHub Releases, which the manifest's absolute URL support already allows.
 
 ## Architecture
 
@@ -178,3 +178,73 @@ The client sends a flexible set of facts from day one (id, version, os, arch, ch
 - Enterprise pinning and approval windows.
 - Admin UI or auth for changing `rollout.json`.
 - Full TUF.
+
+## Desktop app
+
+The window is [Wails](https://wails.io), which shows a web page in a native window using the operating system's own web engine (WebKit on macOS, WebView2 on Windows) instead of bundling a browser, so the app stays around 10 MB. Wails is compiled in only with the `desktop` build tag. Without it, `go build ./cmd/app` is pure Go with no native toolchain, serves the same page on `127.0.0.1:4780` (loopback only, Host header checked) and opens a browser tab. The tests, the demo scripts and the Linux release use this build. A native window on Linux would need WebKitGTK and a recent glibc on every machine, and a server without them could never install an update.
+
+The page is one embedded HTML file that polls `/api/state` once a second. In the desktop build it is served from an HTTP handler inside the process, so no port is opened. The only two write endpoints, settings and clear history, accept only a JSON request, which a page on another site cannot send, and settings accept only the built-in choices.
+
+Settings live in `settings.json`, and the update history in `update-history.jsonl`, in the state directory. That is beside the executable, except inside a macOS app bundle, where it is `~/Library/Application Support/relay`. Every file under `Relay.app/Contents` is covered by the bundle's signature, so the updater never leaves anything there except the executable itself. `--server` and `--interval` override the saved settings for one run and are never saved.
+
+**macOS bundles.** The updater replaces only `Relay.app/Contents/MacOS/relay`, so a release ships the bundle once, for first install, and every update after that is the bare binary, as on the other platforms. The bundle is ad-hoc signed, and its `Info.plist` and icon (`build/icon.icns`, committed so it never changes) are identical in every release. CI takes the update binary from inside that release's signed bundle, so it keeps any installed bundle's signature valid.
+
+## Trust
+
+Every release is signed with an Ed25519 private key that exists only on the release machine and in the `UPDATER_SIGNING_KEY` CI secret. The matching public key is compiled into the app. The update server and the file storage never see the private key. So if the server, the storage or the network is compromised, an attacker can stop updates from arriving but cannot make a client install anything of their own.
+
+The release workflow compiles each platform on a matching runner with `release compile`, which needs only the public key, then signs everything in one final job with `release sign`. The private key is exposed to exactly one job.
+
+## Threat model and limits
+
+- The local demo uses plain HTTP. The deployed server uses HTTPS. Signatures protect integrity either way.
+- A compromised server can withhold updates or keep serving an old release. It cannot forge one. Preventing an indefinite freeze would need signed, expiring manifests as in TUF, noted as future work.
+- The private key is a single point of trust. Rotation would ship a list of trusted public keys in the client and sign new releases with the new key while old clients still accept the old one.
+- Downloads are size capped, every network call has a timeout, and the server serves nothing outside `releases/<version>/<file>`.
+
+## Reliability in detail
+
+- **Interrupted download.** It goes to a temp file next to the executable and is deleted on any mismatch. Leftovers are cleaned on the next start.
+- **Crash during the swap.** The last step is a single atomic rename, so the executable path never holds a half written program. On Windows there is a brief window between two renames, and a failed second rename puts the old program back.
+- **A version that passes its self-test but keeps crashing.** After two failed starts the third start rolls back to `.old` and records the version so it is never installed again on that machine. After 30 seconds of healthy running (`--confirm-after`) the update is confirmed and `.old` is deleted. A newer update waits until the current one is confirmed.
+- **Two copies updating at once.** A lock file prevents it. A lock older than ten minutes is treated as left by a crash.
+- **A corrupt state file.** It is moved aside and treated as empty. State writes are atomic.
+- **Server unreachable or a bad response.** Logged and retried at the next check. The program never exits because of the updater.
+- **Restart.** On macOS and Linux the program `exec`s the new binary, keeping its process ID. On Windows a running executable can be renamed but not overwritten, so the old one is renamed aside, the new one starts as a new process, and the old one exits.
+
+## Operator page
+
+With `ADMIN_TOKEN` set (16 characters or more), the server serves `/admin` behind HTTP basic auth, with any username and the token as the password. It shows each channel's version, rollout percentage and pause switch, the releases on disk, and the clients that checked in recently with the version they run. It can also import a release that CI published to GitHub, given `GITHUB_REPO` and, for a private repository, `GITHUB_TOKEN`. Everything it does, `release promote` does from the command line.
+
+## Hosting
+
+The server is a stateless binary that reads a directory, so it runs unchanged on Cloud Run, Fly.io or any container host (`Dockerfile`). Set `BASE_URL` to its public address. On Cloud Run the `releases` directory is a Cloud Storage bucket mounted as a volume, so promotions and imports persist across restarts.
+
+```sh
+gcloud run deploy relay-updateserver --source . --region us-east1 --allow-unauthenticated \
+  --max-instances 1 --env-vars-file run-env.yaml \
+  --add-volume name=releases,type=cloud-storage,bucket=<bucket> \
+  --add-volume-mount volume=releases,mount-path=/data
+```
+
+`run-env.yaml` holds `BASE_URL`, `RELEASES_DIR: /data`, `ADMIN_TOKEN` and `GITHUB_REPO`. After the first deploy, `.github/workflows/deploy.yml` redeploys on every push to `main` that touches the server. It signs in to Google with Workload Identity Federation, set up once by `scripts/setup-deploy-identity.sh`, so no cloud key is stored in GitHub. The operator page's client list is kept in memory per instance, which is why the service runs one instance.
+
+Release builds default the app to this server through `release compile --cloud-server <url>`. A local build has no cloud server and offers only This computer.
+
+## Shipping a release by hand
+
+```sh
+go run ./cmd/release keygen                                  # once; commit pubkey.txt, never signing.key
+go run ./cmd/release build --version 1.2.0                   # releases/1.2.0/{app-*, release.json}
+go run ./cmd/release build --version 1.2.0 --desktop --targets darwin/arm64
+go run ./cmd/release promote --version 1.2.0 --channel beta --percent 10
+go run ./cmd/release promote --version 1.2.0                 # stable, 100 percent
+go run ./cmd/release promote --version 1.2.0 --paused        # kill switch
+```
+
+Building and promoting are separate on purpose. A build can sit in `releases/` for as long as needed before any client hears about it.
+
+## Dependencies
+
+The standard library, plus `golang.org/x/mod/semver` for version comparison and Wails for the desktop window. Only the `desktop` build tag pulls in Wails. The updater, server and release tool use neither.
+
