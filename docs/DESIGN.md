@@ -138,11 +138,12 @@ The client sends a flexible set of facts from day one (id, version, os, arch, ch
 10. **Post-swap health and rollback**: before the swap, record the new version in `update-state.json` as pending. On startup, if an update is pending, count the start; after two failed starts the third start rolls back to `.old` and records the version so it is never installed again. After running healthy for `--confirm-after` (default 30 s), clear the marker and delete `.old`. An update that arrives while another is unconfirmed waits.
 11. **Housekeeping**: on start, clean up stray temp files and a leftover `.bad` binary. A lock file stops two instances from updating at once; a lock older than ten minutes is treated as stale.
 12. **Flags**: `--server`, `--channel`, `--interval`, `--confirm-after`, `--ui`, `--open`, `--selftest`, `--version`.
-13. **Window**: a local page on `--ui` (default 127.0.0.1:4780) served from an embedded HTML file, polling `/api/state`. History is appended to `update-history.jsonl` next to the binary.
+13. **Window**: one embedded HTML page polling `/api/state`. Built with the `desktop` tag it is shown in a native Wails window and served in-process; without the tag it is served on `--ui` (default 127.0.0.1:4780) and opened in a browser. History is appended to `update-history.jsonl` next to the binary.
 
 ## Release tool
 
 - `release keygen` writes `signing.key` (private, gitignored) and `pubkey.txt`.
+- `release compile` builds binaries with only the public key; `release sign` hashes and signs whatever binaries are in `releases/<version>`. CI compiles per platform and signs in one job.
 - `release build --version 1.2.0`:
   - cross-compiles linux/amd64, linux/arm64, darwin/amd64, darwin/arm64, windows/amd64 with version and public key injected
   - computes sha256 and size for each

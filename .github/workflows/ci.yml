@@ -17,5 +17,14 @@ jobs:
           go-version-file: go.mod
       - run: go vet ./...
       - run: go test ./...
+      - name: desktop build compiles
+        shell: bash
+        run: |
+          case "$RUNNER_OS" in
+            Linux) sudo apt-get update && sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev
+                   go build -tags desktop,production,webkit2_41 -o /dev/null ./cmd/app ;;
+            macOS) CGO_LDFLAGS="-framework UniformTypeIdentifiers" go build -tags desktop,production -o /dev/null ./cmd/app ;;
+            Windows) go build -tags desktop,production -ldflags "-H windowsgui" -o app.exe ./cmd/app ;;
+          esac
       - if: runner.os == 'Linux'
         run: test -z "$(gofmt -l .)" || (gofmt -l .; exit 1)

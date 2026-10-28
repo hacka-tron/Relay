@@ -75,6 +75,51 @@ func TestBuildProducesSignedRelease(t *testing.T) {
 	}
 }
 
+// compile then sign, as CI does it on separate machines, must produce the
+// same kind of signed release as build.
+func TestCompileThenSign(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go build")
+	}
+	dir := t.TempDir()
+	var out bytes.Buffer
+	if err := run([]string{"keygen", "--out", dir}, &out); err != nil {
+		t.Fatal(err)
+	}
+	rels := filepath.Join(dir, "releases")
+	target := runtime.GOOS + "/" + runtime.GOARCH
+	if err := run([]string{"compile", "--version", "2.0.0", "--pubkey", filepath.Join(dir, "pubkey.txt"),
+		"--out", rels, "--targets", target, "--src", "../app"}, &out); err != nil {
+		t.Fatalf("%v\n%s", err, out.String())
+	}
+	// A stray file next to the binaries (the macOS zip) must be ignored.
+	os.WriteFile(filepath.Join(rels, "2.0.0", "Relay-macos-arm64.zip"), []byte("zip"), 0o644)
+	if err := run([]string{"sign", "--version", "2.0.0", "--key", filepath.Join(dir, "signing.key"), "--out", rels}, &out); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(filepath.Join(rels, "2.0.0", "release.json"))
+	var rel manifest.Release
+	json.Unmarshal(b, &rel)
+	pubText, _ := os.ReadFile(filepath.Join(dir, "pubkey.txt"))
+	pub, _ := manifest.ParsePublicKey(string(pubText))
+	if len(rel.Targets) != 1 || manifest.Verify(pub, rel.Targets[0]) != nil {
+		t.Fatalf("release.json: %s", b)
+	}
+}
+
+func TestParseBinaryName(t *testing.T) {
+	cases := map[string]bool{
+		"app-linux-amd64": true, "app-windows-amd64.exe": true, "app-darwin-arm64": true,
+		"app-linux-amd64.exe": false, "app-windows-amd64": false, "Relay-macos-arm64.zip": false,
+		"release.json": false, "app-linux": false,
+	}
+	for name, want := range cases {
+		if _, _, ok := parseBinaryName(name); ok != want {
+			t.Errorf("%s: ok=%v want %v", name, ok, want)
+		}
+	}
+}
+
 func TestBuildRejectsBadVersionAndMissingKey(t *testing.T) {
 	var out bytes.Buffer
 	for _, v := range []string{"latest", "1.2", "v1.2.3", "../x", "1.2.3+build"} {

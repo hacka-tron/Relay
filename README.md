@@ -15,9 +15,27 @@ make demo          # macOS or Linux
 
 The demo generates a signing key, builds and signs v1.0.0 and v1.1.0, starts the update server, starts the app at v1.0.0, promotes v1.1.0 and shows the app restarting as v1.1.0 under the same PID. It then publishes a v1.2.0 whose bytes were altered after signing and shows the app refusing it. Everything it creates lives in `./demo`, apart from the app's client ID, which goes to the user config directory (`~/Library/Application Support/relay` on macOS, `~/.config/relay` on Linux, `%AppData%\relay` on Windows).
 
-## The window
+## The desktop app
 
-On a fresh start the app opens http://127.0.0.1:4780 in a browser. The page shows the running version, a countdown to the next check, and a history of every update step (available, downloaded, installed, confirmed, rejected, rolled back). A character reacts to what the updater is doing: resting while idle, pinging with its antenna during a check, hopping while an update installs, and wincing when a download is refused. The page is one embedded HTML file, read only, accepts only loopback addresses, checks the Host header, and polls `/api/state` once a second. The history lives in `update-history.jsonl` next to the binary so it survives the restart that every update causes. After an update the new version serves the same page without opening another tab. `--ui` changes the address, `--ui ""` disables it, `--open=false` keeps the browser closed.
+Each release on GitHub includes a downloadable app:
+
+| Platform | Download | Notes |
+|---|---|---|
+| macOS, Apple Silicon | `Relay-macos-arm64.zip` | unzip, drag `Relay.app` to Applications |
+| macOS, Intel | `Relay-macos-x86_64.zip` | same |
+| Windows | `app-windows-amd64.exe` | uses the WebView2 runtime built into Windows 10 and 11 |
+| Linux, x86-64 | `app-linux-amd64` | needs `libwebkit2gtk-4.1` |
+| Linux, ARM | `app-linux-arm64` | opens its page in a browser instead of a window |
+
+The builds are not signed with an Apple or Microsoft certificate (that needs paid accounts), so the first launch of a downloaded copy shows a warning. On macOS, right-click the app and choose Open, or allow it under System Settings, Privacy and Security. On Windows, choose More info, then Run anyway. Updates after that are verified with Relay's own signatures and install silently.
+
+The window shows the running version, a countdown to the next check, and a history of every update step (available, downloaded, installed, confirmed, rejected, rolled back). A character reacts to what the updater is doing: resting while idle, pinging with its antenna during a check, hopping while an update installs, and wincing when a download is refused. The history lives in `update-history.jsonl` next to the executable so it survives the restart that every update causes.
+
+**How it is built.** The window is [Wails](https://wails.io), which shows a web page in a native window using the operating system's own web engine (WebKit on macOS and Linux, WebView2 on Windows) rather than bundling a browser, so the app stays around 10 MB. It is compiled in only with the `desktop` build tag. The page is one embedded HTML file, and the window serves it from an HTTP handler inside the process, so no network port is opened.
+
+Without the tag, `go build ./cmd/app` is still pure Go with no native toolchain. That build serves the same page on `127.0.0.1:4780` (loopback only, Host header checked) and opens a browser tab; `--ui` changes the address and `--open=false` keeps the browser closed. The tests and the demo scripts use this build.
+
+**Updating an app bundle.** On macOS the updater replaces only `Relay.app/Contents/MacOS/relay`, so releases ship the bundle once, for first install, and every update after that is the bare binary, exactly as on the other platforms. The restart `exec`s the new binary in the same process, so the window comes straight back.
 
 ## How it fits together
 
@@ -122,6 +140,7 @@ With `ADMIN_TOKEN` set (16 characters or more), the server also serves `/admin` 
 ```sh
 go run ./cmd/release keygen                      # once; commit pubkey.txt, never signing.key
 go run ./cmd/release build --version 1.2.0       # releases/1.2.0/{app-*, release.json}
+go run ./cmd/release build --version 1.2.0 --desktop --targets darwin/arm64   # with the native window
 go run ./cmd/release promote --version 1.2.0 --channel beta --percent 10
 go run ./cmd/release promote --version 1.2.0     # stable, 100 percent
 go run ./cmd/release promote --version 1.2.0 --paused   # kill switch
@@ -129,7 +148,7 @@ go run ./cmd/release promote --version 1.2.0 --paused   # kill switch
 
 Building and promoting are separate on purpose: a build can sit in `releases/` for as long as you like before any client hears about it.
 
-In CI, pushing a tag such as `v1.2.0` runs `.github/workflows/release.yml`, which tests, builds and signs with the `UPDATER_SIGNING_KEY` repository secret (the one line content of `signing.key`), and uploads the binaries and `release.json` to a GitHub Release. The workflow calls the same `release build` a developer runs locally. To serve a CI-built release from a local server, pull it down with `make fetch VERSION=1.2.0` and then `promote` it.
+In CI, pushing a tag such as `v1.2.0` runs `.github/workflows/release.yml`, which compiles each platform on a matching runner (`release compile`, which needs only the public key), then signs everything in one final job with the `UPDATER_SIGNING_KEY` repository secret (`release sign`), and uploads the binaries, the macOS app zips and `release.json` to a GitHub Release. Splitting compile from sign means the private key is exposed to exactly one job. To serve a CI-built release from a local server, pull it down with `make fetch VERSION=1.2.0` and then `promote` it.
 
 ## Assumptions
 
@@ -169,4 +188,4 @@ make check   # gofmt, go vet, go build
 make test    # go test ./...
 ```
 
-The only dependency outside the standard library is `golang.org/x/mod/semver`.
+Dependencies outside the standard library: `golang.org/x/mod/semver` for version comparison, and Wails for the desktop window, which only the `desktop` build tag pulls in. The updater, server and release tool use neither.

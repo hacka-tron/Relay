@@ -9,9 +9,7 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"runtime"
 	"sync"
 	"time"
 
@@ -155,14 +153,21 @@ func serveUI(addr string, s *uiState, log *slog.Logger) string {
 		log.Warn("window not available", "addr", addr, "err", err)
 		return ""
 	}
+	go http.Serve(ln, localOnly(ln.Addr().String(), s.handler()))
+	return "http://" + ln.Addr().String()
+}
+
+// handler serves the page and its state. The browser build puts it behind
+// a loopback listener; the desktop build hands it straight to the native
+// window, which needs no port at all.
+func (s *uiState) handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Write(uiHTML)
 	})
 	mux.HandleFunc("GET /api/state", s.handleState)
-	go http.Serve(ln, localOnly(ln.Addr().String(), mux))
-	return "http://" + ln.Addr().String()
+	return mux
 }
 
 // localOnly refuses requests whose Host header is not this listener. A
@@ -178,19 +183,4 @@ func localOnly(self string, next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
-}
-
-// openBrowser opens url in the user's default browser. Failure is fine;
-// the URL is logged either way.
-func openBrowser(url string) {
-	var cmd *exec.Cmd
-	switch runtime.GOOS {
-	case "darwin":
-		cmd = exec.Command("open", url)
-	case "windows":
-		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
-	default:
-		cmd = exec.Command("xdg-open", url)
-	}
-	cmd.Start()
 }
