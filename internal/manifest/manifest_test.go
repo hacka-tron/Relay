@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -110,6 +111,7 @@ func TestInvalidFieldsAreRejectedBeforeSigning(t *testing.T) {
 		"newline in os":    func(m *Manifest) { m.OS = "linux\nversion=9.9.9" },
 		"short sha256":     func(m *Manifest) { m.SHA256 = "abc" },
 		"uppercase sha256": func(m *Manifest) { m.SHA256 = "ABCDEF" + m.SHA256[6:] },
+		"non hex sha256":   func(m *Manifest) { m.SHA256 = strings.Repeat("z", 64) },
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {

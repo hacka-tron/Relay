@@ -63,8 +63,13 @@ func keygen(args []string, out io.Writer) error {
 	if err := os.MkdirAll(*dir, 0o755); err != nil {
 		return err
 	}
-	// 0600: the private key is readable by the owner only.
+	// 0600: the private key is readable by the owner only. WriteFile only
+	// applies the mode when it creates the file, so with --force an existing
+	// looser mode would survive; Chmod makes it 0600 either way.
 	if err := os.WriteFile(privPath, []byte(manifest.EncodeKey(priv)), 0o600); err != nil {
+		return err
+	}
+	if err := os.Chmod(privPath, 0o600); err != nil {
 		return err
 	}
 	if err := os.WriteFile(pubPath, []byte(manifest.EncodeKey(pub)), 0o644); err != nil {

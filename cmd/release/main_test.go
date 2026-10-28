@@ -76,6 +76,30 @@ func TestKeygenRefusesToOverwrite(t *testing.T) {
 	}
 }
 
+// Rotating a key that had loose permissions must not leave the new key
+// readable by other users.
+func TestKeygenForceTightensMode(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("unix file modes")
+	}
+	dir := t.TempDir()
+	var out bytes.Buffer
+	if err := run([]string{"keygen", "--out", dir}, &out); err != nil {
+		t.Fatal(err)
+	}
+	priv := filepath.Join(dir, "signing.key")
+	if err := os.Chmod(priv, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := run([]string{"keygen", "--out", dir, "--force"}, &out); err != nil {
+		t.Fatal(err)
+	}
+	info, _ := os.Stat(priv)
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("after --force signing.key mode = %o, want 600", info.Mode().Perm())
+	}
+}
+
 func TestUnknownCommand(t *testing.T) {
 	if err := run([]string{"frobnicate"}, &bytes.Buffer{}); err == nil {
 		t.Fatal("unknown command accepted")

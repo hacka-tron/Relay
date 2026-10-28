@@ -10,7 +10,9 @@ package manifest
 
 import (
 	"crypto/ed25519"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
@@ -76,21 +78,21 @@ func (m Manifest) CanonicalMessage() []byte {
 // A newline inside a field could let one field masquerade as another, so
 // neither signer nor verifier accepts such a manifest.
 func (m Manifest) validate() error {
-	fields := map[string]string{
-		"version": m.Version,
-		"os":      m.OS,
-		"arch":    m.Arch,
-		"sha256":  m.SHA256,
+	fields := []struct{ name, value string }{
+		{"version", m.Version},
+		{"os", m.OS},
+		{"arch", m.Arch},
+		{"sha256", m.SHA256},
 	}
-	for name, v := range fields {
-		if v == "" {
-			return fmt.Errorf("manifest: %s is empty", name)
+	for _, f := range fields {
+		if f.value == "" {
+			return fmt.Errorf("manifest: %s is empty", f.name)
 		}
-		if strings.ContainsAny(v, "\r\n") {
-			return fmt.Errorf("manifest: %s contains a newline", name)
+		if strings.ContainsAny(f.value, "\r\n") {
+			return fmt.Errorf("manifest: %s contains a newline", f.name)
 		}
 	}
-	if len(m.SHA256) != 64 || strings.ToLower(m.SHA256) != m.SHA256 {
+	if raw, err := hex.DecodeString(m.SHA256); err != nil || len(raw) != sha256.Size || strings.ToLower(m.SHA256) != m.SHA256 {
 		return errors.New("manifest: sha256 must be 64 lowercase hex characters")
 	}
 	return nil
@@ -113,6 +115,12 @@ func Sign(priv ed25519.PrivateKey, m *Manifest) error {
 // Verify checks m.Signature against the manifest's own fields using the
 // public key. The client calls this before trusting anything else in the
 // manifest. It returns nil only when the signature is valid.
+//
+// Verify proves the manifest came from the key holder; it does not prove
+// the manifest is right for this machine. A compromised server could still
+// hand a linux client a genuinely signed windows manifest, or an old
+// version. The client must separately check that OS and Arch equal
+// runtime.GOOS and runtime.GOARCH and that Version is newer than its own.
 func Verify(pub ed25519.PublicKey, m Manifest) error {
 	if err := m.validate(); err != nil {
 		return err
