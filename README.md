@@ -121,7 +121,7 @@ go run ./cmd/release promote --version 1.2.0 --paused   # kill switch
 
 Building and promoting are separate on purpose: a build can sit in `releases/` for as long as you like before any client hears about it.
 
-In CI, pushing a tag such as `v1.2.0` runs `.github/workflows/release.yml`, which tests, builds and signs with the `UPDATER_SIGNING_KEY` repository secret (the one line content of `signing.key`), and uploads the binaries and `release.json` to a GitHub Release. The workflow calls the same `release build` a developer runs locally.
+In CI, pushing a tag such as `v1.2.0` runs `.github/workflows/release.yml`, which tests, builds and signs with the `UPDATER_SIGNING_KEY` repository secret (the one line content of `signing.key`), and uploads the binaries and `release.json` to a GitHub Release. The workflow calls the same `release build` a developer runs locally. To serve a CI-built release from a local server, pull it down with `make fetch VERSION=1.2.0` and then `promote` it.
 
 ## Assumptions
 

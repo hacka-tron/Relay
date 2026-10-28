@@ -1,4 +1,4 @@
-.PHONY: test check fmt demo keygen build server
+.PHONY: test check fmt demo keygen build fetch server
 
 test:
 	go test ./...
@@ -20,6 +20,11 @@ keygen:
 # make build VERSION=1.2.0
 build:
 	go run ./cmd/release build --version $(VERSION)
+
+# make fetch VERSION=1.2.0: pull a CI-built release into releases/ so the
+# local server can offer it.
+fetch:
+	gh release download v$(VERSION) --dir releases/$(VERSION) --clobber
 
 server:
 	go run ./cmd/updateserver
