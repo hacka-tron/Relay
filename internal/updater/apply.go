@@ -53,7 +53,9 @@ func (c *Client) Apply(ctx context.Context, m manifest.Manifest, exe string) err
 	if err := install.Swap(exe, path); err != nil {
 		os.Remove(path)
 		st.Pending = nil
-		st.Save(exe)
+		if saveErr := st.Save(exe); saveErr != nil {
+			c.Log.Error("clear pending after failed swap", "err", saveErr)
+		}
 		return err
 	}
 	c.Log.Info("installed, restarting", "new_version", m.Version)
