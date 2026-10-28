@@ -128,6 +128,7 @@ func checkLoop(ctx context.Context, up *updater.Client, exe string, interval tim
 		if err := checkOnce(ctx, up, exe, ui, log); err != nil {
 			log.Error("update check failed", "err", err)
 			ui.setStatus("rejected", err.Error())
+			ui.record("rejected", err.Error())
 		} else {
 			ui.setStatus("idle", "up to date")
 		}

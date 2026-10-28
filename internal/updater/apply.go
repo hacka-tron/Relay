@@ -36,14 +36,12 @@ func (c *Client) Apply(ctx context.Context, m manifest.Manifest, exe string) err
 	c.notify("available", "update available: v"+m.Version)
 	path, err := c.Download(ctx, m, filepath.Dir(exe))
 	if err != nil {
-		c.notify("rejected", "refused v"+m.Version+": "+err.Error())
 		return err
 	}
 	c.Log.Info("downloaded and verified", "new_version", m.Version)
 	c.notify("downloaded", "downloaded v"+m.Version+", size and sha256 match")
 	if err := install.SelfTest(path, m.Version); err != nil {
 		os.Remove(path)
-		c.notify("rejected", "refused v"+m.Version+": self-test failed")
 		return err
 	}
 	// Mark the update pending before the swap, not after: if the process

@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -24,11 +25,15 @@ func TestHistoryPersistsAcrossRestarts(t *testing.T) {
 	}
 
 	for i := 0; i < maxHistory+10; i++ {
-		second.record("check", "x")
+		second.record("check", fmt.Sprint(i))
 	}
 	third := newUIState("1.1.0", "stable", "http://s", "cid", exe)
 	if len(third.History) != maxHistory {
 		t.Fatalf("history not trimmed: %d", len(third.History))
+	}
+	b, _ := os.ReadFile(filepath.Join(filepath.Dir(exe), "update-history.jsonl"))
+	if lines := strings.Count(string(b), "\n"); lines != maxHistory {
+		t.Fatalf("file not trimmed on disk: %d lines", lines)
 	}
 }
 
@@ -66,5 +71,28 @@ func TestServeUIStateEndpoint(t *testing.T) {
 	}
 	if other, _ := http.Get(url + "/other"); other.StatusCode != 404 {
 		t.Fatalf("unknown path: %d", other.StatusCode)
+	}
+	// A request that arrived through another host name (DNS rebinding) is refused.
+	req, _ := http.NewRequest("GET", url+"/api/state", nil)
+	req.Host = "evil.example:4780"
+	if resp, _ := http.DefaultClient.Do(req); resp.StatusCode != 403 {
+		t.Fatalf("foreign host: %d, want 403", resp.StatusCode)
+	}
+}
+
+func TestServeUIRefusesNonLoopback(t *testing.T) {
+	s := newUIState("1.0.0", "stable", "http://s", "cid", filepath.Join(t.TempDir(), "app"))
+	if url := serveUI("0.0.0.0:0", s, slog.New(slog.NewTextHandler(io.Discard, nil))); url != "" {
+		t.Fatal("bound a non-loopback address")
+	}
+}
+
+func TestRecordSkipsRepeats(t *testing.T) {
+	s := newUIState("1.0.0", "stable", "http://s", "cid", filepath.Join(t.TempDir(), "app"))
+	s.record("rejected", "server down")
+	s.record("rejected", "server down")
+	s.record("rejected", "other")
+	if len(s.History) != 2 {
+		t.Fatalf("history: %+v", s.History)
 	}
 }
