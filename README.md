@@ -15,6 +15,10 @@ make demo          # macOS or Linux
 
 The demo generates a signing key, builds and signs v1.0.0 and v1.1.0, starts the update server, starts the app at v1.0.0, promotes v1.1.0 and shows the app restarting as v1.1.0 under the same PID. It then publishes a v1.2.0 whose bytes were altered after signing and shows the app refusing it. Everything it creates lives in `./demo`, apart from the app's client ID, which goes to the user config directory (`~/Library/Application Support/relay` on macOS, `~/.config/relay` on Linux, `%AppData%\relay` on Windows).
 
+## The window
+
+On a fresh start the app opens http://127.0.0.1:4780 in a browser. The page shows the running version, a countdown to the next check, and a history of every update step (available, downloaded, installed, confirmed, rejected, rolled back). A character reacts to what the updater is doing: resting while idle, raising its antenna during a check, hopping while an update installs, and wincing when a download is refused. The page is one embedded HTML file, read only, bound to the loopback address, and polls `/api/state` once a second. The history lives in `update-history.jsonl` next to the binary so it survives the restart that every update causes. After an update the new version serves the same page without opening another tab. `--ui` changes the address, `--ui ""` disables it, `--open=false` keeps the browser closed.
+
 ## How it fits together
 
 ```
@@ -32,7 +36,7 @@ The demo generates a signing key, builds and signs v1.0.0 and v1.1.0, starts the
 
 | Path | What it is |
 |---|---|
-| `cmd/app` | The program. Prints `hello from vX.Y.Z` every few seconds and runs the update loop. |
+| `cmd/app` | The program. Prints `hello from vX.Y.Z` every few seconds, runs the update loop, and serves a small window page on localhost. |
 | `cmd/updateserver` | HTTP server: `/v1/update` decides what to offer, `/files/` serves binaries. |
 | `cmd/release` | `keygen`, `build` (cross compile, hash, sign), `promote` (edit `rollout.json`). |
 | `internal/manifest` | The signed description of one binary, and `Sign` / `Verify`. |
