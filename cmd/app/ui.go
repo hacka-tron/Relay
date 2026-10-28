@@ -67,12 +67,6 @@ func (s *uiState) setStatus(status, note string) {
 	s.Status, s.StatusNote = status, note
 }
 
-func (s *uiState) setServer(url string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.Server = url
-}
-
 func (s *uiState) setChecked(next time.Time) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -158,21 +152,17 @@ func loadHistory(path string) []Event {
 }
 
 // stateResponse is what /api/state returns: the window state plus the
-// settings and the choices the page can offer.
+// settings and the intervals the page can offer.
 type stateResponse struct {
 	*uiState
-	Settings  *settings      `json:"settings,omitempty"`
-	Servers   []serverOption `json:"servers,omitempty"`
-	Intervals []int          `json:"intervals,omitempty"`
+	Settings  *settings `json:"settings,omitempty"`
+	Intervals []int     `json:"intervals,omitempty"`
 }
 
 func (s *uiState) handleState(w http.ResponseWriter, r *http.Request) {
 	resp := stateResponse{uiState: s}
 	if s.settings != nil {
 		cur := s.settings.get()
-		s.settings.mu.Lock()
-		resp.Servers = append([]serverOption(nil), s.settings.options...)
-		s.settings.mu.Unlock()
 		resp.Settings, resp.Intervals = &cur, intervalChoices
 	}
 	s.mu.Lock()

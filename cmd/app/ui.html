@@ -30,31 +30,23 @@
   .list { display: flex; flex-direction: column; gap: 8px; } .row { display: flex; gap: 12px; align-items: flex-start; background: var(--card); border-radius: 12px; padding: 10px 12px; }
   .dot { width: 10px; height: 10px; border-radius: 999px; margin-top: 6px; flex-shrink: 0; background: var(--faint); }
   .row .t { font-size: 14px; font-weight: 700; } .row .d { font-size: 12px; color: var(--faint); } .row time { font-size: 12px; color: var(--faint); white-space: nowrap; }
-  footer { display: flex; justify-content: space-between; font-size: 12px; color: var(--faint); } footer b { font-weight: 700; color: var(--muted); }
-  /* Settings: a gear in the footer pops a sheet up from the bottom, the
-     same width as the content column, over a dimmed backdrop. */
+  footer { display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: var(--faint); } footer b { font-weight: 700; color: var(--muted); }
+  /* How often to check: a pill in the footer opens a small card of
+     choices above it, which closes again once one is picked. */
   .app { position: relative; }
-  .gear { border: 0; background: none; color: var(--muted); padding: 6px; margin: -6px; border-radius: 8px; cursor: pointer; display: flex; min-width: 32px; min-height: 32px; align-items: center; justify-content: center; }
-  .gear:hover { color: var(--fg); background: var(--track); }
-  .backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.35); z-index: 2; }
-  .sheet { position: absolute; left: 16px; right: 16px; bottom: 0; z-index: 3; display: flex; flex-direction: column; gap: 10px;
-    background: var(--card); border-radius: 20px 20px 0 0; padding: 14px 16px 18px; box-shadow: 0 -12px 30px rgba(0, 0, 0, 0.3); animation: rise 0.22s ease-out; }
-  .sheet-head { display: flex; align-items: center; justify-content: space-between; }
-  .sheet-head b { font-size: 17px; font-weight: 800; }
-  .close { border: 0; background: var(--track); color: var(--muted); width: 32px; height: 32px; border-radius: 999px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
-  .backdrop[hidden], .sheet[hidden] { display: none; }
-  @keyframes rise { from { transform: translateY(40px); opacity: 0; } to { transform: none; opacity: 1; } }
-
-  .label { font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.6px; color: var(--faint); }
-  .cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-  .cards button { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; background: var(--bg); border: 2px solid var(--line); border-radius: 14px; padding: 12px 14px; color: var(--fg); font: inherit; text-align: left; cursor: pointer; min-height: 44px; }
-  .cards button[aria-pressed=true] { border-color: var(--sel); }
-  .cards b { font-size: 15px; font-weight: 800; } .cards small { font-size: 12px; color: var(--faint); overflow-wrap: anywhere; }
-  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
-  .chips button { border: 1px solid var(--line); background: none; color: var(--muted); font: inherit; font-size: 13px; font-weight: 700; padding: 6px 10px; border-radius: 999px; cursor: pointer; min-height: 34px; }
-  .chips button[aria-pressed=true] { background: var(--sel); border-color: var(--sel); color: var(--on-sel); font-weight: 800; }
+  .interval { display: flex; align-items: center; gap: 8px; border: 1px solid var(--line); background: var(--card); color: var(--fg); font: inherit; font-size: 13px; font-weight: 700; padding: 7px 12px; border-radius: 999px; cursor: pointer; min-height: 34px; }
+  .interval[aria-expanded=true] { border-color: var(--sel); }
+  .interval .chev { transition: transform 0.15s; }
+  .interval[aria-expanded=true] .chev { transform: rotate(180deg); }
+  .picker { position: absolute; left: 16px; bottom: 56px; width: 264px; z-index: 3; background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 14px;
+    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.35); display: flex; flex-direction: column; gap: 10px; animation: rise 0.18s ease-out; }
+  .picker[hidden] { display: none; }
+  @keyframes rise { from { transform: translateY(10px); opacity: 0; } to { transform: none; opacity: 1; } }
   button.link { border: 0; background: none; color: var(--blue); font: inherit; font-size: 13px; font-weight: 700; cursor: pointer; padding: 6px 4px; min-height: 32px; }
-  .hint { font-size: 12px; color: var(--faint); font-weight: 500; overflow-wrap: anywhere; }
+  .label { font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.6px; color: var(--faint); }
+  .chips { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+  .chips button { border: 1px solid var(--line); background: none; color: var(--muted); font: inherit; font-size: 13px; font-weight: 700; padding: 6px 0; border-radius: 999px; cursor: pointer; min-height: 34px; }
+  .chips button[aria-pressed=true] { background: var(--sel); border-color: var(--sel); color: var(--on-sel); font-weight: 800; }
 
   /* Character states. The body sets data-state; each state turns on its own animations and parts. */
   .only-checking, .only-updating, .only-rejected { display: none; }
@@ -63,7 +55,7 @@
   [data-state=checking] .bar div { background: var(--blue); } [data-state=updating] .bar div { background: var(--green); } [data-state=rejected] .bar div { background: var(--red); }
   @keyframes bob { 0%,100% { transform: translateY(0) } 50% { transform: translateY(-8px) } }
   @keyframes blink { 0%,92%,100% { transform: scaleY(1) } 96% { transform: scaleY(0.1) } }
-  @keyframes ping { 0% { transform: scale(0.4); opacity: 0.9 } 100% { transform: scale(2.4); opacity: 0 } }
+  @keyframes ping { 0% { transform: scale(0.6); opacity: 0.95 } 100% { transform: scale(6); opacity: 0 } }
   @keyframes tilt { 0%,100% { transform: rotate(-4deg) } 50% { transform: rotate(4deg) } }
   @keyframes spin { to { transform: rotate(360deg) } }
   @keyframes hop { 0%,100% { transform: translateY(0) } 30% { transform: translateY(-16px) } 50% { transform: translateY(0) } }
@@ -72,13 +64,17 @@
   .body { transform-origin: 100px 150px; } .eye { transform-origin: center; transform-box: fill-box; }
   [data-state=idle] .body { animation: bob 2.6s ease-in-out infinite; } [data-state=idle] .eye { animation: blink 5s infinite; }
   [data-state=checking] .body { animation: tilt 1.2s ease-in-out infinite; }
-  .ring { transform-origin: center; transform-box: fill-box; animation: ping 1.2s ease-out infinite; } .ring.b { animation-delay: 0.4s; }
+  /* Signal rings: drawn inside Bolt's body so they stay centred on the
+     antenna as he tilts, and growing well past the card so they read as
+     waves going out to the server. The stroke stays thin as they grow. */
+  .ring { transform-origin: center; transform-box: fill-box; animation: ping 1.8s ease-out infinite; vector-effect: non-scaling-stroke; }
+  .ring.b { animation-delay: 0.6s; } .ring.c { animation-delay: 1.2s; }
   [data-state=updating] .body { animation: hop 1.4s ease-in-out infinite; } .orbit { transform-origin: 100px 100px; animation: spin 1.6s linear infinite; }
   .spark { transform-origin: center; transform-box: fill-box; animation: sparkle 1.4s ease-in-out infinite; } .spark.b { animation-delay: 0.5s; }
   [data-state=rejected] .body { animation: shake 2.2s ease-in-out infinite; }
   .mouth-idle, .mouth-happy, .mouth-sad, .brows { display: none; }
   [data-state=idle] .mouth-idle, [data-state=checking] .mouth-idle, [data-state=updating] .mouth-happy, [data-state=rejected] .mouth-sad, [data-state=rejected] .brows { display: initial; }
-  @media (prefers-reduced-motion: reduce) { .body, .eye, .ring, .orbit, .spark, .sheet { animation: none !important; } }
+  @media (prefers-reduced-motion: reduce) { .body, .eye, .ring, .orbit, .spark, .picker { animation: none !important; } }
 </style>
 </head>
 <body data-state="idle">
@@ -90,7 +86,6 @@
 
   <div class="card">
     <svg width="200" height="200" viewBox="0 0 200 200" role="img" aria-label="Bolt, the Relay mascot">
-      <g class="only-checking"><circle class="ring" cx="100" cy="14" r="12" fill="none" stroke="var(--blue)" stroke-width="3"/><circle class="ring b" cx="100" cy="14" r="12" fill="none" stroke="var(--blue)" stroke-width="3"/></g>
       <g class="only-updating">
         <circle class="orbit" cx="100" cy="100" r="88" fill="none" stroke="var(--blue)" stroke-width="5" stroke-dasharray="140 420" stroke-linecap="round"/>
         <path class="spark" d="M38 40 l4 10 l10 4 l-10 4 l-4 10 l-4 -10 l-10 -4 l10 -4 z" fill="var(--accent)"/>
@@ -98,6 +93,7 @@
       </g>
       <g class="only-rejected"><rect x="150" y="60" width="44" height="40" rx="8" fill="var(--card)" stroke="var(--red)" stroke-width="4"/><line x1="160" y1="70" x2="184" y2="90" stroke="var(--red)" stroke-width="4" stroke-linecap="round"/><line x1="184" y1="70" x2="160" y2="90" stroke="var(--red)" stroke-width="4" stroke-linecap="round"/></g>
       <g class="body">
+        <g class="only-checking"><circle class="ring" cx="100" cy="14" r="12" fill="none" stroke="var(--sel)" stroke-width="2.5"/><circle class="ring b" cx="100" cy="14" r="12" fill="none" stroke="var(--sel)" stroke-width="2.5"/><circle class="ring c" cx="100" cy="14" r="12" fill="none" stroke="var(--sel)" stroke-width="2.5"/></g>
         <line x1="100" y1="46" x2="100" y2="18" stroke="var(--ink)" stroke-width="5" stroke-linecap="round"/>
         <circle id="tip" cx="100" cy="14" r="8" fill="var(--accent)"/>
         <rect x="40" y="46" width="120" height="104" rx="38" fill="var(--accent)"/>
@@ -129,25 +125,17 @@
   </div>
 
   <footer>
-    <button type="button" class="gear" id="gear" aria-label="Settings" aria-expanded="false" aria-controls="sheet" hidden>
-      <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7z"/><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+    <button type="button" class="interval" id="interval" aria-expanded="false" aria-controls="picker" hidden>
+      <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M8 4.5 V8 L10.5 9.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+      <span id="interval-text"></span>
+      <svg class="chev" width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 6.5 L5 3.5 L8 6.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
     </button>
     <div>client <b id="client"></b></div>
   </footer>
 
-  <div class="backdrop" id="backdrop" hidden></div>
-  <div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title" hidden>
-    <div class="sheet-head">
-      <b id="sheet-title">Settings</b>
-      <button type="button" class="close" id="close" aria-label="Close settings">
-        <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M2 2 L10 10 M10 2 L2 10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-      </button>
-    </div>
-    <div class="label" id="server-label">Get updates from</div>
-    <div class="cards" id="servers" role="group" aria-labelledby="server-label"></div>
-    <div class="label" id="interval-label">Check every</div>
-    <div class="chips" id="intervals" role="group" aria-labelledby="interval-label"></div>
-    <div class="hint" id="server-url" role="status" hidden></div>
+  <div class="picker" id="picker" role="dialog" aria-labelledby="picker-title" hidden>
+    <div class="label" id="picker-title">Check for updates every</div>
+    <div class="chips" id="intervals" role="group" aria-labelledby="picker-title"></div>
   </div>
 </div>
 <script>
@@ -162,13 +150,17 @@
   function render(s) {
     text('version', 'v' + s.version); text('channel', s.channel + ' channel');
     text('client', (s.client_id || '').slice(0, 8) || 'none');
+    // Go sends year 1 for a time that has not happened yet; treat it as none.
+    var never = function (t) { return !t || t.indexOf('0001-') === 0; };
+    if (never(s.last_check)) s.last_check = null;
+    if (never(s.next_check)) s.next_check = null;
     var now = Date.now(), state = s.status;
     if (s.last_check && s.last_check !== lastCheck) { lastCheck = s.last_check; holdUntil = now + 2500; }
     if (state === 'idle' && now < holdUntil) state = 'checking';
     document.body.dataset.state = state;
     var next = s.next_check ? new Date(s.next_check).getTime() : 0, last = s.last_check ? new Date(s.last_check).getTime() : 0;
     var secs = Math.max(0, Math.round((next - now) / 1000));
-    if (state === 'idle') { text('title', 'Up to date'); el('note').innerHTML = 'Bolt checks for a new version regularly.<br>Next check in <b>' + secs + 's</b>'; }
+    if (state === 'idle') { text('title', 'Up to date'); el('note').innerHTML = 'Bolt checks for a new version regularly.' + (next ? '<br>Next check in <b>' + secs + 's</b>' : ''); }
     if (state === 'checking') { text('title', 'Checking for updates'); text('note', s.status_note || 'asking the server'); }
     if (state === 'updating') { text('title', s.status_note || 'Installing update'); text('note', 'Signature verified, download checked, self-test running, then a restart.'); }
     if (state === 'rejected') { text('title', 'Something went wrong'); text('note', s.status_note || ''); }
@@ -184,76 +176,50 @@
     if (sec % 60 === 0) return (sec / 60) + ' min';
     return sec + 's';
   }
-  var ICONS = {
-    cloud: '<svg width="28" height="20" viewBox="0 0 28 20" aria-hidden="true"><path d="M7 18 h14 a5 5 0 0 0 0 -10 a7 7 0 0 0 -13.4 -1.5 A5.5 5.5 0 0 0 7 18 z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>',
-    local: '<svg width="28" height="20" viewBox="0 0 28 20" aria-hidden="true"><rect x="3" y="2" width="22" height="13" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M9 18 h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
-    custom: '<svg width="28" height="20" viewBox="0 0 28 20" aria-hidden="true"><circle cx="14" cy="10" r="7" fill="none" stroke="currentColor" stroke-width="2"/><path d="M7 10 h14 M14 3 c-3 3 -3 11 0 14 c3 -3 3 -11 0 -14" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>'
-  };
-  // Card subtitles. The local card names its port so it is clear which
-  // server on this computer it talks to.
-  function subtitle(o) {
-    if (o.id === 'cloud') return 'Recommended';
-    var port = (o.url.match(/:(\d+)\/?$/) || [])[1];
-    if (o.id === 'local') return port ? 'Port ' + port + ', for testing' : 'For testing';
-    return o.url.replace(/^https?:\/\//, '');
-  }
 
-  // The gear opens the sheet; the close button, the dimmed backdrop and
-  // Escape close it, and focus goes back to the gear.
-  function setSheet(open) {
-    el('sheet').hidden = el('backdrop').hidden = !open;
-    el('gear').setAttribute('aria-expanded', open ? 'true' : 'false');
-    if (open) el('close').focus(); else el('gear').focus();
+  // The pill opens the picker; picking a choice, clicking outside it, or
+  // Escape closes it again.
+  function setPicker(open) {
+    el('picker').hidden = !open;
+    el('interval').setAttribute('aria-expanded', open ? 'true' : 'false');
   }
-  el('gear').onclick = function () { setSheet(true); };
-  el('close').onclick = el('backdrop').onclick = function () { setSheet(false); };
-  document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && !el('sheet').hidden) setSheet(false); });
+  el('interval').onclick = function (e) { e.stopPropagation(); setPicker(el('picker').hidden); };
+  document.addEventListener('click', function (e) {
+    if (!el('picker').hidden && !el('picker').contains(e.target)) setPicker(false);
+  });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && !el('picker').hidden) { setPicker(false); el('interval').focus(); }
+  });
 
-  // Settings: rebuilt only when they change, so a click is never
-  // interrupted by the once-a-second refresh.
+  // Rebuilt only when the choice changes, so a click is never interrupted
+  // by the once-a-second refresh.
   var shown = '';
   function renderSettings(s) {
     if (!s.settings) return;
-    el('gear').hidden = false;
-    var key = JSON.stringify([s.settings, s.servers, s.intervals]);
+    el('interval').hidden = false;
+    var current = s.settings.interval_seconds;
+    text('interval-text', 'Checks every ' + label(current));
+    var key = JSON.stringify([current, s.intervals]);
     if (key === shown) return;
     shown = key;
-    var current = null;
-    el('servers').innerHTML = '';
-    s.servers.forEach(function (o) {
-      var b = document.createElement('button');
-      b.type = 'button';
-      b.setAttribute('aria-pressed', o.id === s.settings.server ? 'true' : 'false');
-      // The cloud address is never shown; a custom one is.
-      b.innerHTML = (ICONS[o.id] || ICONS.custom) + '<b></b><small></small>';
-      b.querySelector('b').textContent = o.label;
-      b.querySelector('small').textContent = subtitle(o);
-      // Clicking the server already in use does nothing; that also covers
-      // Custom, which exists only for this run and cannot be saved.
-      b.onclick = function () { if (o.id !== s.settings.server) save({ server: o.id }); };
-      el('servers').appendChild(b);
-      if (o.id === s.settings.server) current = o;
-    });
     var choices = s.intervals.slice();
-    if (choices.indexOf(s.settings.interval_seconds) < 0) choices.unshift(s.settings.interval_seconds);
+    if (choices.indexOf(current) < 0) choices.unshift(current); // a --interval value for this run
     el('intervals').innerHTML = '';
     choices.forEach(function (sec) {
       var b = document.createElement('button');
       b.type = 'button'; b.textContent = label(sec);
-      b.setAttribute('aria-pressed', sec === s.settings.interval_seconds ? 'true' : 'false');
-      b.onclick = function () { if (sec !== s.settings.interval_seconds) save({ interval_seconds: sec }); };
+      b.setAttribute('aria-pressed', sec === current ? 'true' : 'false');
+      b.onclick = function () {
+        setPicker(false);
+        el('interval').focus();
+        if (sec !== current) save({ interval_seconds: sec });
+      };
       el('intervals').appendChild(b);
     });
-
   }
-  // Sends only the field that changed, so a value given on the command
-  // line for this run is never saved by accident.
   function save(v) {
     fetch('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(v) })
-      .then(function (r) {
-        shown = ''; poll();
-        if (!r.ok) { el('server-url').hidden = false; text('server-url', 'Could not save that setting.'); }
-      });
+      .then(function () { shown = ''; poll(); });
   }
   el('clear').onclick = function () {
     fetch('/api/history/clear', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).then(poll);

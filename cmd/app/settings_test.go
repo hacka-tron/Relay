@@ -11,112 +11,78 @@ import (
 	"testing"
 )
 
-func testOptions() []serverOption {
-	return []serverOption{{ID: "cloud", Label: "Cloud", URL: "https://cloud.example"}, {ID: "local", Label: "This computer", URL: localServer}}
-}
+func interval(n int) settingsChange { return settingsChange{IntervalSeconds: &n} }
 
-func TestSettingsDefaultsSaveAndReload(t *testing.T) {
+func TestSettingsDefaultSaveAndReload(t *testing.T) {
 	dir := t.TempDir()
-	s := newSettingsStore(dir, testOptions())
-	if got := s.get(); got.Server != "cloud" || got.IntervalSeconds != 60 {
-		t.Fatalf("defaults: %+v", got)
+	s := newSettingsStore(dir)
+	if got := s.get().IntervalSeconds; got != 60 {
+		t.Fatalf("default interval %d, want 60", got)
 	}
-	if err := s.set(change("local", 300)); err != nil {
+	if err := s.set(interval(300)); err != nil {
 		t.Fatal(err)
-	}
-	if s.serverURL() != localServer {
-		t.Fatalf("url: %s", s.serverURL())
 	}
 	select {
 	case <-s.changed:
 	default:
 		t.Fatal("set did not wake the check loop")
 	}
-	again := newSettingsStore(dir, testOptions())
-	if got := again.get(); got.Server != "local" || got.IntervalSeconds != 300 {
-		t.Fatalf("not reloaded: %+v", got)
+	if got := newSettingsStore(dir).get().IntervalSeconds; got != 300 {
+		t.Fatalf("not reloaded: %d", got)
 	}
 }
 
-func TestSettingsRejectUnofferedValues(t *testing.T) {
-	s := newSettingsStore(t.TempDir(), testOptions())
-	for _, v := range []settingsChange{change("evil", 60), change("local", 1), change("local", 0), change("custom", 60)} {
-		if s.set(v) == nil {
-			t.Fatalf("accepted %v %v", *v.Server, *v.IntervalSeconds)
+func TestSettingsRejectUnofferedIntervals(t *testing.T) {
+	s := newSettingsStore(t.TempDir())
+	for _, n := range []int{0, 1, 7, 86400} {
+		if s.set(interval(n)) == nil {
+			t.Fatalf("accepted %d", n)
 		}
 	}
-	if s.get().Server != "cloud" {
+	if s.get().IntervalSeconds != 60 {
 		t.Fatal("a rejected value was applied")
 	}
 }
 
-func change(server string, interval int) settingsChange {
-	return settingsChange{Server: &server, IntervalSeconds: &interval}
-}
-
-// The window changes one field at a time. Changing the interval while a
-// --server override is active must save the interval, keep the override
-// for this run, and never save the override.
-func TestSettingsChangeOneFieldKeepsOverrideUnsaved(t *testing.T) {
+// A settings file from an older version, which also saved a server
+// choice, keeps its interval and loses the server choice.
+func TestSettingsIgnoreOldServerChoice(t *testing.T) {
 	dir := t.TempDir()
-	s := newSettingsStore(dir, testOptions())
-	s.override("http://other.example:9000", 5)
-	interval := 300
-	if err := s.set(settingsChange{IntervalSeconds: &interval}); err != nil {
-		t.Fatal(err)
-	}
-	if s.serverURL() != "http://other.example:9000" || s.get().IntervalSeconds != 300 {
-		t.Fatalf("effective: %s %+v", s.serverURL(), s.get())
-	}
-	again := newSettingsStore(dir, testOptions())
-	if got := again.get(); got.Server != "cloud" || got.IntervalSeconds != 300 {
-		t.Fatalf("saved: %+v", got)
-	}
-	// Choosing a server replaces the override.
-	server := "local"
-	if err := s.set(settingsChange{Server: &server}); err != nil {
-		t.Fatal(err)
-	}
-	if s.serverURL() != localServer {
-		t.Fatalf("server override not replaced: %s", s.serverURL())
-	}
-}
-
-func TestSettingsLoadEachFieldOnItsOwn(t *testing.T) {
-	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "settings.json"), []byte(`{"server":"gone","interval_seconds":900}`), 0o644)
-	s := newSettingsStore(dir, testOptions())
-	if got := s.get(); got.Server != "cloud" || got.IntervalSeconds != 900 {
-		t.Fatalf("got %+v", got)
+	os.WriteFile(filepath.Join(dir, "settings.json"), []byte(`{"server":"local","interval_seconds":900}`), 0o644)
+	if got := newSettingsStore(dir).get().IntervalSeconds; got != 900 {
+		t.Fatalf("interval %d, want 900", got)
 	}
 }
 
 func TestSettingsOverrideIsNotSaved(t *testing.T) {
 	dir := t.TempDir()
-	s := newSettingsStore(dir, testOptions())
-	s.override("http://other.example:9000", 8)
-	if s.serverURL() != "http://other.example:9000" || s.get().IntervalSeconds != 8 {
-		t.Fatalf("override not applied: %s %+v", s.serverURL(), s.get())
+	s := newSettingsStore(dir)
+	s.override(8)
+	if s.get().IntervalSeconds != 8 {
+		t.Fatal("override not applied")
 	}
-	if again := newSettingsStore(dir, testOptions()); again.get().Server != "cloud" {
+	if newSettingsStore(dir).get().IntervalSeconds != 60 {
 		t.Fatal("override was saved")
 	}
 }
 
-func TestSettingsWithoutCloudOfferOnlyLocal(t *testing.T) {
+func TestUpdateServerFollowsTheBuild(t *testing.T) {
 	old := cloudServer
-	cloudServer = ""
 	defer func() { cloudServer = old }()
-	opts := serverOptions()
-	if len(opts) != 1 || opts[0].ID != "local" {
-		t.Fatalf("options: %+v", opts)
+	cloudServer = ""
+	if updateServer() != localServer {
+		t.Fatal("a build without a cloud server should use the local one")
+	}
+	cloudServer = "https://cloud.example"
+	if updateServer() != "https://cloud.example" {
+		t.Fatal("a release build should use its cloud server")
 	}
 }
 
 func TestSettingsEndpoint(t *testing.T) {
 	exe := filepath.Join(t.TempDir(), "app")
 	ui := newUIState("1.0.0", "stable", "x", "cid", exe)
-	ui.settings = newSettingsStore(filepath.Dir(exe), testOptions())
+	ui.settings = newSettingsStore(filepath.Dir(exe))
 	url := serveUI("127.0.0.1:0", ui, slog.New(slog.NewTextHandler(io.Discard, nil)))
 
 	post := func(contentType, body string) int {
@@ -127,17 +93,14 @@ func TestSettingsEndpoint(t *testing.T) {
 		resp.Body.Close()
 		return resp.StatusCode
 	}
-	if code := post("text/plain", `{"server":"local","interval_seconds":30}`); code != 415 {
+	if code := post("text/plain", `{"interval_seconds":30}`); code != 415 {
 		t.Fatalf("form-style post: %d, want 415", code)
 	}
 	if code := post("application/json", `{"interval_seconds":7}`); code != 400 {
 		t.Fatalf("bad interval: %d, want 400", code)
 	}
-	if code := post("application/json", `{"server":"local"}`); code != 204 {
-		t.Fatalf("server only: %d, want 204", code)
-	}
 	if code := post("application/json", `{"interval_seconds":30}`); code != 204 {
-		t.Fatalf("interval only: %d, want 204", code)
+		t.Fatalf("good interval: %d, want 204", code)
 	}
 
 	resp, err := http.Get(url + "/api/state")
@@ -146,12 +109,11 @@ func TestSettingsEndpoint(t *testing.T) {
 	}
 	defer resp.Body.Close()
 	var got struct {
-		Settings settings       `json:"settings"`
-		Servers  []serverOption `json:"servers"`
-		Version  string         `json:"version"`
+		Settings  settings `json:"settings"`
+		Intervals []int    `json:"intervals"`
 	}
 	json.NewDecoder(resp.Body).Decode(&got)
-	if got.Settings.Server != "local" || got.Settings.IntervalSeconds != 30 || len(got.Servers) != 2 || got.Version != "1.0.0" {
+	if got.Settings.IntervalSeconds != 30 || len(got.Intervals) != 6 {
 		t.Fatalf("state: %+v", got)
 	}
 }
@@ -178,7 +140,6 @@ func TestClearHistory(t *testing.T) {
 	if resp.StatusCode != 204 || len(ui.History) != 0 {
 		t.Fatalf("clear: %d, %d entries left", resp.StatusCode, len(ui.History))
 	}
-	// Cleared for good: a restarted app loads nothing.
 	if again := newUIState("1.0.0", "stable", "x", "cid", exe); len(again.History) != 0 {
 		t.Fatal("history came back after restart")
 	}
