@@ -21,21 +21,23 @@ import (
 	"github.com/hacka-tron/relay/internal/updater"
 )
 
-// Both values are injected at build time by the release tool:
+// These are injected at build time by the release tool:
 //
-//	-ldflags "-X main.version=1.2.0 -X main.publicKey=<base64>"
+//	-ldflags "-X main.version=1.2.0 -X main.publicKey=<base64> -X main.cloudServer=https://..."
 //
-// A plain `go build` leaves them at these defaults, which disables the
-// updater, so a developer build never tries to replace itself.
+// A plain `go build` leaves them at these defaults: no public key disables
+// the updater, so a developer build never tries to replace itself, and no
+// cloud server means the window only offers a server on this computer.
 var (
-	version   = "0.0.0-dev"
-	publicKey = ""
+	version     = "0.0.0-dev"
+	publicKey   = ""
+	cloudServer = ""
 )
 
 func main() {
-	server := flag.String("server", "http://localhost:8080", "update server base URL")
+	server := flag.String("server", "", "update server base URL; overrides the window's setting for this run")
 	channel := flag.String("channel", "stable", "release channel to follow")
-	interval := flag.Duration("interval", time.Minute, "how often to check for updates")
+	interval := flag.Duration("interval", 0, "how often to check for updates; overrides the window's setting for this run")
 	confirmAfter := flag.Duration("confirm-after", 30*time.Second, "how long a new version must run before it is confirmed and the previous one is dropped")
 	selftest := flag.Bool("selftest", false, "print the version and exit; used to validate a new binary before installing it")
 	showVersion := flag.Bool("version", false, "print the version and exit")
@@ -59,12 +61,15 @@ func main() {
 	if err != nil {
 		log.Error("cannot find own executable; self-update disabled", "err", err)
 	} else {
-		up := newUpdater(*server, *channel, log)
-		ui = newUIState(version, *channel, *server, clientIDOf(up), exe)
+		store := newSettingsStore(install.StateDir(exe), serverOptions())
+		store.override(*server, int(interval.Seconds()))
+		up := newUpdater(store.serverURL(), *channel, log)
+		ui = newUIState(version, *channel, store.serverURL(), clientIDOf(up), exe)
+		ui.settings = store
 		afterUpdate = startupChecks(exe, *confirmAfter, ui, log)
 		if up != nil {
 			up.Notify = ui.record
-			go checkLoop(ctx, up, exe, *interval, ui, log)
+			go checkLoop(ctx, up, exe, store, ui, log)
 		}
 	}
 
@@ -131,11 +136,14 @@ func newUpdater(server, channel string, log *slog.Logger) *updater.Client {
 // checkLoop checks once at startup and then every interval, with up to 20
 // percent of jitter so a fleet of clients does not hit the server in step.
 // Errors are logged and retried next time; they never stop the program.
-func checkLoop(ctx context.Context, up *updater.Client, exe string, interval time.Duration, ui *uiState, log *slog.Logger) {
-	if interval < time.Second {
-		interval = time.Second
-	}
+// Before every check it reads the current settings, so a server or
+// interval chosen in the window applies right away: changing a setting
+// also cuts the wait short.
+func checkLoop(ctx context.Context, up *updater.Client, exe string, store *settingsStore, ui *uiState, log *slog.Logger) {
 	for {
+		up.ServerURL = store.serverURL()
+		ui.setServer(up.ServerURL)
+		interval := max(time.Duration(store.get().IntervalSeconds)*time.Second, time.Second)
 		ui.setStatus("checking", "asking the server what the "+up.Channel+" channel offers")
 		if err := checkOnce(ctx, up, exe, ui, log); err != nil {
 			log.Error("update check failed", "err", err)
@@ -151,6 +159,7 @@ func checkLoop(ctx context.Context, up *updater.Client, exe string, interval tim
 		case <-ctx.Done():
 			return
 		case <-time.After(wait):
+		case <-store.changed:
 		}
 	}
 }

@@ -14,6 +14,11 @@ on:
 permissions:
   contents: read
 
+env:
+  # Release builds default to the deployed update server; the app can
+  # switch to a server on the local machine from its window.
+  CLOUD_SERVER: https://relay-updateserver-107741567910.us-east1.run.app
+
 jobs:
   compile:
     strategy:
@@ -36,7 +41,7 @@ jobs:
       - name: compile
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          go run ./cmd/release compile --version "$VERSION" --targets "${{ matrix.targets }}" ${{ matrix.desktop && '--desktop' || '' }}
+          go run ./cmd/release compile --version "$VERSION" --targets "${{ matrix.targets }}" --cloud-server "$CLOUD_SERVER" ${{ matrix.desktop && '--desktop' || '' }}
       - name: macOS app bundles
         if: startsWith(matrix.targets, 'darwin')
         run: |
