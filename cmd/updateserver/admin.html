@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Relay admin</title>
+<style>
+  :root { --bg: #fff; --fg: #1a1a1a; --muted: #666; --line: #ddd; --ok: #1b7f3b; --bad: #b3261e; --accent: #2457c5; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #141414; --fg: #eee; --muted: #999; --line: #333; --ok: #5fcf7f; --bad: #ff7b72; --accent: #7aa2ff; } }
+  body { margin: 0 auto; padding: 16px; max-width: 1100px; background: var(--bg); color: var(--fg); font: 15px/1.5 system-ui, sans-serif; }
+  h1 { font-size: 22px; margin: 0 0 4px; } h2 { font-size: 17px; margin: 28px 0 8px; }
+  p.sub { color: var(--muted); margin: 0 0 16px; }
+  table { border-collapse: collapse; width: 100%; } th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  th { color: var(--muted); font-weight: 600; font-size: 13px; }
+  input[type=text], input[type=number], select { padding: 4px 6px; border: 1px solid var(--line); border-radius: 4px; background: var(--bg); color: var(--fg); }
+  input[type=number] { width: 4.5em; } button { padding: 4px 10px; border: 1px solid var(--accent); border-radius: 4px; background: var(--accent); color: #fff; cursor: pointer; }
+  button.quiet { background: none; color: var(--accent); }
+  .msg { padding: 8px 12px; border-radius: 4px; margin-bottom: 12px; } .ok { background: color-mix(in srgb, var(--ok) 15%, transparent); } .bad { background: color-mix(in srgb, var(--bad) 15%, transparent); }
+  .paused { color: var(--bad); font-weight: 600; } code { font-size: 13px; } .muted { color: var(--muted); }
+  form.inline { display: inline; } .row form { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+</style>
+</head>
+<body>
+<h1>Relay admin</h1>
+<p class="sub">Who gets which version. Changes take effect on the next client check. Refreshes every 10 seconds while idle.</p>
+{{if .Message}}<div class="msg ok">{{.Message}}</div>{{end}}
+{{if .Error}}<div class="msg bad">{{.Error}}</div>{{end}}
+
+<h2>Channels</h2>
+<table>
+<tr><th>Channel</th><th>Version</th><th>Rollout</th><th>Paused</th><th></th></tr>
+{{range $name := .Channels}}{{with index $.Config.Channels $name}}
+<tr class="row"><td colspan="5">
+  <form method="post" action="/admin/channel">
+    <input type="hidden" name="channel" value="{{$name}}">
+    <strong>{{$name}}</strong>
+    <select name="version">{{if not (onDisk $.Releases .Version)}}<option value="{{.Version}}" selected>{{.Version}} (not on disk)</option>{{end}}{{range $.Releases}}<option value="{{.Version}}" {{if eq .Version (index $.Config.Channels $name).Version}}selected{{end}}>{{.Version}}</option>{{end}}</select>
+    <input type="number" name="percent" min="0" max="100" value="{{.RolloutPercent}}"> %
+    <label><input type="checkbox" name="paused" {{if .Paused}}checked{{end}}> paused</label>
+    <button>Apply</button>
+    {{if .Paused}}<span class="paused">PAUSED</span>{{end}}
+  </form>
+  <form class="inline" method="post" action="/admin/channel/delete"><input type="hidden" name="channel" value="{{$name}}"><button class="quiet">remove</button></form>
+</td></tr>
+{{end}}{{end}}
+<tr class="row"><td colspan="5">
+  <form method="post" action="/admin/channel">
+    <input type="text" name="channel" placeholder="new channel" required>
+    <select name="version">{{range .Releases}}<option value="{{.Version}}">{{.Version}}</option>{{end}}</select>
+    <input type="number" name="percent" min="0" max="100" value="100"> %
+    <label><input type="checkbox" name="paused"> paused</label>
+    <button>Add channel</button>
+  </form>
+</td></tr>
+</table>
+
+<h2>Releases on disk</h2>
+<table>
+<tr><th>Version</th><th>Platforms</th></tr>
+{{range .Releases}}<tr><td><code>{{.Version}}</code></td><td class="muted">{{range .Targets}}{{.OS}}/{{.Arch}} {{end}}</td></tr>{{else}}<tr><td colspan="2" class="muted">none yet</td></tr>{{end}}
+<tr class="row"><td colspan="2">
+  <form method="post" action="/admin/import">
+    <input type="text" name="version" placeholder="1.2.0" required>
+    <button>Import from GitHub release</button>
+    <span class="muted">downloads the tagged release's binaries and release.json into this server</span>
+  </form>
+</td></tr>
+</table>
+
+<h2>Clients seen by this server</h2>
+<table>
+<tr><th>Client</th><th>Running</th><th>Platform</th><th>Channel</th><th>Last offered</th><th>Last seen</th></tr>
+{{range .Clients}}<tr><td><code>{{.ClientID}}</code></td><td><code>{{.Version}}</code></td><td class="muted">{{.OS}}/{{.Arch}}</td><td>{{.Channel}}</td><td>{{if .Offered}}<code>{{.Offered}}</code>{{else}}<span class="muted">up to date</span>{{end}}</td><td class="muted">{{ago .LastSeen}}</td></tr>{{else}}<tr><td colspan="6" class="muted">no check-ins yet</td></tr>{{end}}
+</table>
+<script>
+  // Refresh every 10 seconds, but not while someone is typing in a form.
+  setInterval(function () {
+    var el = document.activeElement;
+    if (!el || el === document.body) location.reload();
+  }, 10000);
+</script>
+</body>
+</html>
