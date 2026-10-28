@@ -41,6 +41,7 @@ func main() {
 	showVersion := flag.Bool("version", false, "print the version and exit")
 	uiAddr := flag.String("ui", "127.0.0.1:4780", "browser build only: address for the local page; empty disables it")
 	open := flag.Bool("open", true, "browser build only: open the page in a browser on a fresh start")
+	headless := flag.Bool("headless", false, "no window and no page: run as a background agent")
 	flag.Parse()
 
 	if *selftest || *showVersion {
@@ -74,13 +75,15 @@ func main() {
 	// localhost and opens a browser tab (window_browser.go). After an
 	// update a browser tab is already open and polling, so only a fresh
 	// start opens one.
-	showWindow(ctx, ui, windowOptions{addr: *uiAddr, openBrowser: *open && !afterUpdate}, log)
+	showWindow(ctx, ui, windowOptions{addr: *uiAddr, openBrowser: *open && !afterUpdate, headless: *headless}, log)
 }
 
-// windowOptions are the flags that only the browser build uses.
+// windowOptions are the window flags. addr and openBrowser apply only to
+// the browser build.
 type windowOptions struct {
 	addr        string
 	openBrowser bool
+	headless    bool
 }
 
 // greet is the demo "application": it prints its version every few seconds.

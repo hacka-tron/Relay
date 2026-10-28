@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 )
@@ -226,5 +227,25 @@ func TestLock(t *testing.T) {
 	os.Chtimes(lockPath(exe), old, old)
 	if _, err := Lock(exe); err != nil {
 		t.Fatal("stale lock not taken over:", err)
+	}
+}
+
+func TestStateDirKeepsBundlesClean(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("AppData", filepath.Join(home, "AppData"))
+
+	plain := filepath.Join(home, "bin", "app")
+	if got := StateDir(plain); got != filepath.Dir(plain) {
+		t.Fatalf("plain install: %s", got)
+	}
+	bundled := filepath.Join(home, "Applications", "Relay.app", "Contents", "MacOS", "relay")
+	got := StateDir(bundled)
+	if strings.Contains(got, "Relay.app") {
+		t.Fatalf("state inside the bundle: %s", got)
+	}
+	if info, err := os.Stat(got); err != nil || !info.IsDir() {
+		t.Fatalf("state dir not created: %s", got)
 	}
 }

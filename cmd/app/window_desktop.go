@@ -17,10 +17,17 @@ import (
 // on Windows) showing the same page the browser build serves. The page's
 // requests go straight to ui.handler() inside the process, so no port is
 // opened. Closing the window quits the program. It returns when the
-// window closes.
-func showWindow(ctx context.Context, ui *uiState, _ windowOptions, log *slog.Logger) {
-	if ui == nil {
+// window closes. With --headless it opens nothing and runs until stopped,
+// for running the app as a background agent.
+func showWindow(ctx context.Context, ui *uiState, opts windowOptions, log *slog.Logger) {
+	if opts.headless {
 		<-ctx.Done()
+		return
+	}
+	if ui == nil {
+		// Without a state there is nothing to show; quitting beats leaving
+		// an invisible process the user cannot find or close.
+		log.Error("no window state; exiting")
 		return
 	}
 	err := wails.Run(&options.App{
@@ -41,7 +48,6 @@ func showWindow(ctx context.Context, ui *uiState, _ windowOptions, log *slog.Log
 		},
 	})
 	if err != nil {
-		log.Error("window failed; running without one", "err", err)
-		<-ctx.Done()
+		log.Error("window failed; exiting (use --headless to run without one)", "err", err)
 	}
 }

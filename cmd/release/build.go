@@ -200,7 +200,7 @@ func goBuild(goos, goarch, version, pubkey, src, outPath string, desktop bool, o
 				return errors.New("a macOS desktop build must run on macOS")
 			}
 			arch := map[string]string{"amd64": "x86_64", "arm64": "arm64"}[goarch]
-			env = append(env, "CGO_ENABLED=1", "CC=clang -arch "+arch, "MACOSX_DEPLOYMENT_TARGET=11.0",
+			env = append(env, "CGO_ENABLED=1", "CC=clang -arch "+arch, "MACOSX_DEPLOYMENT_TARGET=13.0",
 				"CGO_LDFLAGS=-framework UniformTypeIdentifiers")
 		case "linux":
 			if runtime.GOOS != "linux" || runtime.GOARCH != goarch {

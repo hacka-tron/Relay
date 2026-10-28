@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/hacka-tron/relay/internal/atomicfile"
+	"github.com/hacka-tron/relay/internal/install"
 )
 
 // The window: a small page served on localhost that shows what the updater
@@ -52,7 +53,7 @@ const maxHistory = 200
 
 func newUIState(version, channel, server, clientID, exe string) *uiState {
 	s := &uiState{Version: version, Channel: channel, Server: server, ClientID: clientID, Status: "idle",
-		historyPath: filepath.Join(filepath.Dir(exe), "update-history.jsonl")}
+		historyPath: filepath.Join(install.StateDir(exe), "update-history.jsonl")}
 	s.History = loadHistory(s.historyPath)
 	return s
 }

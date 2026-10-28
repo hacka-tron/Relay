@@ -21,21 +21,24 @@ Each release on GitHub includes a downloadable app:
 
 | Platform | Download | Notes |
 |---|---|---|
-| macOS, Apple Silicon | `Relay-macos-arm64.zip` | unzip, drag `Relay.app` to Applications |
-| macOS, Intel | `Relay-macos-x86_64.zip` | same |
-| Windows | `app-windows-amd64.exe` | uses the WebView2 runtime built into Windows 10 and 11 |
-| Linux, x86-64 | `app-linux-amd64` | needs `libwebkit2gtk-4.1` |
-| Linux, ARM | `app-linux-arm64` | opens its page in a browser instead of a window |
+| macOS 13 or later, Apple Silicon | `Relay-macos-arm64.zip` | unzip, drag `Relay.app` to Applications |
+| macOS 13 or later, Intel | `Relay-macos-x86_64.zip` | same |
+| Windows 10 and 11 | `app-windows-amd64.exe` | uses the WebView2 runtime, which current Windows ships with; older installs are offered a download |
+| Linux, x86-64 and ARM | `app-linux-amd64`, `app-linux-arm64` | opens its page in a browser rather than a native window |
 
-The builds are not signed with an Apple or Microsoft certificate (that needs paid accounts), so the first launch of a downloaded copy shows a warning. On macOS, right-click the app and choose Open, or allow it under System Settings, Privacy and Security. On Windows, choose More info, then Run anyway. Updates after that are verified with Relay's own signatures and install silently.
+Move the Mac app out of Downloads before opening it. macOS runs apps opened straight from Downloads from a temporary read-only copy, where the updater cannot replace itself.
 
-The window shows the running version, a countdown to the next check, and a history of every update step (available, downloaded, installed, confirmed, rejected, rolled back). A character reacts to what the updater is doing: resting while idle, pinging with its antenna during a check, hopping while an update installs, and wincing when a download is refused. The history lives in `update-history.jsonl` next to the executable so it survives the restart that every update causes.
+The builds are not signed with an Apple or Microsoft certificate (that needs paid accounts), so the first launch of a downloaded copy is blocked once. On macOS, try to open it, then choose Open Anyway under System Settings, Privacy and Security. On Windows, choose More info, then Run anyway. Updates after that are verified with Relay's own signatures and install silently.
+
+Linux keeps the browser page on purpose: a native window there needs WebKitGTK and a recent glibc on every machine, and a server without them could never install an update. Every build accepts `--headless` to run as a background agent with no window or page at all.
+
+The window shows the running version, a countdown to the next check, and a history of every update step (available, downloaded, installed, confirmed, rejected, rolled back). A character reacts to what the updater is doing: resting while idle, pinging with its antenna during a check, hopping while an update installs, and wincing when a download is refused. The history lives in `update-history.jsonl` so it survives the restart that every update causes. It and the updater's state file sit beside the executable, except in the macOS app, where they go to `~/Library/Application Support/relay` so the signed bundle is never modified apart from the executable itself.
 
 **How it is built.** The window is [Wails](https://wails.io), which shows a web page in a native window using the operating system's own web engine (WebKit on macOS and Linux, WebView2 on Windows) rather than bundling a browser, so the app stays around 10 MB. It is compiled in only with the `desktop` build tag. The page is one embedded HTML file, and the window serves it from an HTTP handler inside the process, so no network port is opened.
 
 Without the tag, `go build ./cmd/app` is still pure Go with no native toolchain. That build serves the same page on `127.0.0.1:4780` (loopback only, Host header checked) and opens a browser tab; `--ui` changes the address and `--open=false` keeps the browser closed. The tests and the demo scripts use this build.
 
-**Updating an app bundle.** On macOS the updater replaces only `Relay.app/Contents/MacOS/relay`, so releases ship the bundle once, for first install, and every update after that is the bare binary, exactly as on the other platforms. The restart `exec`s the new binary in the same process, so the window comes straight back.
+**Updating an app bundle.** On macOS the updater replaces only `Relay.app/Contents/MacOS/relay`, so releases ship the bundle once, for first install, and every update after that is the bare binary, exactly as on the other platforms. The bundle is ad-hoc signed, and its `Info.plist` and icon are identical in every release, so the update binary, which CI takes from inside that release's signed bundle, keeps the installed bundle's signature valid. The restart `exec`s the new binary in the same process, so the window comes straight back.
 
 ## How it fits together
 

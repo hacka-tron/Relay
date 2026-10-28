@@ -14,7 +14,7 @@ import (
 // build used by `go build`, the tests and the demo scripts: pure Go, no
 // native toolchain needed.
 func showWindow(ctx context.Context, ui *uiState, opts windowOptions, log *slog.Logger) {
-	if ui != nil && opts.addr != "" {
+	if ui != nil && opts.addr != "" && !opts.headless {
 		if url := serveUI(opts.addr, ui, log); url != "" {
 			log.Info("window", "url", url)
 			if opts.openBrowser {

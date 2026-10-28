@@ -57,10 +57,30 @@ func (s State) Skips(version string) bool {
 	return false
 }
 
-func statePath(exe string) string { return filepath.Join(filepath.Dir(exe), "update-state.json") }
-func oldPath(exe string) string   { return exe + ".old" }
-func badPath(exe string) string   { return exe + ".bad" }
-func lockPath(exe string) string  { return filepath.Join(filepath.Dir(exe), "update.lock") }
+func statePath(exe string) string { return filepath.Join(StateDir(exe), "update-state.json") }
+
+// StateDir is where the long-lived files (update state, history) are kept:
+// beside the executable, except inside a macOS app bundle. There every
+// file under Contents is covered by the bundle's signature, and an extra
+// file would make macOS treat the app as damaged, so they go to
+// ~/Library/Application Support/relay instead. Short-lived files (the
+// download, .old, the lock) still sit beside the executable, because the
+// swap needs them on the same filesystem; they are gone once an update is
+// confirmed.
+func StateDir(exe string) string {
+	if strings.Contains(filepath.ToSlash(exe), ".app/Contents/MacOS/") {
+		if base, err := os.UserConfigDir(); err == nil {
+			dir := filepath.Join(base, "relay")
+			if os.MkdirAll(dir, 0o700) == nil {
+				return dir
+			}
+		}
+	}
+	return filepath.Dir(exe)
+}
+func oldPath(exe string) string  { return exe + ".old" }
+func badPath(exe string) string  { return exe + ".bad" }
+func lockPath(exe string) string { return filepath.Join(filepath.Dir(exe), "update.lock") }
 
 // LoadState reads update-state.json. A missing file is an empty state. A
 // file that cannot be parsed is moved aside and also treated as empty,

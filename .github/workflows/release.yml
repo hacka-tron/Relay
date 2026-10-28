@@ -20,10 +20,11 @@ jobs:
       matrix:
         include:
           - { runner: macos-latest, targets: "darwin/arm64,darwin/amd64", desktop: true }
-          - { runner: ubuntu-24.04, targets: "linux/amd64", desktop: true }
           - { runner: ubuntu-24.04, targets: "windows/amd64", desktop: true }
-          # No arm64 Linux runner here, so that build keeps the browser window.
-          - { runner: ubuntu-24.04, targets: "linux/arm64", desktop: false }
+          # Linux ships the pure Go build, which shows its page in a browser.
+          # A native window there would need WebKitGTK and a matching glibc
+          # on every machine, and a headless install could never update.
+          - { runner: ubuntu-24.04, targets: "linux/amd64,linux/arm64", desktop: false }
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
@@ -32,9 +33,6 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - name: native libraries
-        if: matrix.desktop && startsWith(matrix.targets, 'linux')
-        run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev
       - name: compile
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
@@ -45,7 +43,7 @@ jobs:
           VERSION="${GITHUB_REF_NAME#v}"
           for arch in arm64 amd64; do
             OUT="$RUNNER_TEMP/bundle-$arch"; mkdir -p "$OUT"
-            scripts/macos-app.sh "releases/$VERSION/app-darwin-$arch" "$VERSION" "$OUT"
+            scripts/macos-app.sh "releases/$VERSION/app-darwin-$arch" "$OUT"
             mv "$OUT"/Relay-macos-*.zip "releases/$VERSION/"
           done
       - uses: actions/upload-artifact@v4
@@ -53,6 +51,7 @@ jobs:
           name: compiled-${{ strategy.job-index }}
           path: releases/
           if-no-files-found: error
+          overwrite: true
 
   publish:
     needs: compile
