@@ -154,7 +154,7 @@ func TestFilesServesOnlyVersionedBinaries(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "signing.key"), []byte("x"), 0o644)
 	for _, p := range []string{
 		"/files/", "/files/1.1.0/", "/files/1.1.0", // listings and bare dirs
-		"/files/rollout.json", "/files/1.1.0/release.json", // config files
+		"/files/rollout.json", "/files/1.1.0/release.json", "/files/1.1.0/RELEASE.JSON", // config files
 		"/files/1.1.0/.hidden", "/files/./signing.key", "/files/../signing.key", // hidden and traversal
 		"/files/..%2f/signing.key", "/files/%2e%2e/signing.key",
 	} {

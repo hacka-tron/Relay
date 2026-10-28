@@ -170,7 +170,7 @@ func (h *handler) absoluteURL(version, stored string) string {
 // releases tree are not downloadable, and there is no directory listing.
 func (h *handler) file(w http.ResponseWriter, r *http.Request) {
 	version, name := r.PathValue("version"), r.PathValue("name")
-	if !safeSegment(version) || !safeSegment(name) || strings.HasSuffix(name, ".json") {
+	if !safeSegment(version) || !safeSegment(name) || strings.HasSuffix(strings.ToLower(name), ".json") {
 		http.NotFound(w, r)
 		return
 	}
