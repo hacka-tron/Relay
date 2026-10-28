@@ -28,7 +28,7 @@ import (
 //
 // A plain `go build` leaves them at these defaults: no public key disables
 // the updater, so a developer build never tries to replace itself, and no
-// cloud server means the window only offers a server on this computer.
+// cloud server means the app uses a server on this computer (localhost:8080).
 var (
 	version     = "0.0.0-dev"
 	publicKey   = ""

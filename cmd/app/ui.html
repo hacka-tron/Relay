@@ -182,7 +182,13 @@
   function setPicker(open) {
     el('picker').hidden = !open;
     el('interval').setAttribute('aria-expanded', open ? 'true' : 'false');
+    var chosen = el('intervals').querySelector('[aria-pressed=true]');
+    if (open && chosen) chosen.focus();
   }
+  // Tabbing out of the picker closes it, like clicking outside does.
+  el('picker').addEventListener('focusout', function (e) {
+    if (!el('picker').contains(e.relatedTarget) && e.relatedTarget !== el('interval')) setPicker(false);
+  });
   el('interval').onclick = function (e) { e.stopPropagation(); setPicker(el('picker').hidden); };
   document.addEventListener('click', function (e) {
     if (!el('picker').hidden && !el('picker').contains(e.target)) setPicker(false);
