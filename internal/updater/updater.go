@@ -49,7 +49,7 @@ type Client struct {
 	// show progress. It must return quickly.
 	Notify func(step, detail string)
 
-	attempts map[string]int // failed attempts per version, see Apply
+	attempts map[string]int // failed attempts per release in this run, see Apply
 }
 
 // notify calls Notify if one is set.
@@ -169,10 +169,10 @@ func (c *Client) Download(ctx context.Context, m manifest.Manifest, dir string) 
 	return path, nil
 }
 
-// badReleaseError marks a failure that is the release's fault, not the
-// network's: the downloaded bytes do not match the signed size or hash, or
-// the new binary fails its self-test. Only these count towards giving up
-// on a version; a dropped connection is simply retried.
+// badReleaseError marks a failure of what was offered rather than of the
+// connection: the downloaded bytes do not match the manifest's size or
+// hash, or the new binary fails its self-test. Only these count towards
+// giving up on a release; a dropped connection is simply retried.
 type badReleaseError struct{ err error }
 
 func (e *badReleaseError) Error() string { return e.err.Error() }

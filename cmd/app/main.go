@@ -177,9 +177,10 @@ func checkOnce(ctx context.Context, up *updater.Client, exe string, ui *uiState,
 	if err != nil || !ok {
 		return err
 	}
-	// A version given up on earlier is treated as no update at all, so it
-	// does not show as a failure on every check.
-	if st, err := install.LoadState(exe); err == nil && st.Skips(m.Version) {
+	// A release that was rolled back, or that failed its checks too often
+	// in this run, is treated as no update, so it does not show as a
+	// failure on every check.
+	if st, err := install.LoadState(exe); (err == nil && st.Skips(m.Version)) || up.GaveUp(m) {
 		return nil
 	}
 	log.Info("update available", "new_version", m.Version)

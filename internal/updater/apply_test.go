@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/hacka-tron/relay/internal/install"
@@ -108,8 +109,9 @@ func TestApplyRefusesSkippedAndUnconfirmedVersions(t *testing.T) {
 	}
 }
 
-// A signed release whose download does not match its hash is tried
-// MaxAttempts times, then skipped for good, and the history says so.
+// A release whose download does not match its hash is tried MaxAttempts
+// times and then left alone for the rest of the run. Nothing is written
+// down, so a restart (a new Client) tries again.
 func TestApplyGivesUpOnABadReleaseAfterThreeAttempts(t *testing.T) {
 	c, exe, fs := applySetup(t)
 	c.Restart = func(string) error { t.Fatal("restarted"); return nil }
@@ -123,9 +125,11 @@ func TestApplyGivesUpOnABadReleaseAfterThreeAttempts(t *testing.T) {
 			t.Fatalf("attempt %d: err = %v, want a failure", i, err)
 		}
 	}
-	st, _ := install.LoadState(exe)
-	if !st.Skips("1.1.0") {
-		t.Fatal("version not skipped after MaxAttempts failures")
+	if !c.GaveUp(fs.m) {
+		t.Fatal("not given up after MaxAttempts failures")
+	}
+	if st, _ := install.LoadState(exe); st.Skips("1.1.0") {
+		t.Fatal("giving up was written down; it must last only for this run")
 	}
 	if last := steps[len(steps)-1]; last != "gaveup" {
 		t.Fatalf("last step %q, want gaveup (steps %v)", last, steps)
@@ -135,6 +139,12 @@ func TestApplyGivesUpOnABadReleaseAfterThreeAttempts(t *testing.T) {
 	}
 	if b, _ := os.ReadFile(exe); string(b) != "old program" {
 		t.Fatal("executable changed")
+	}
+	// A different release of the same version, say a fixed upload, is tried.
+	other := fs.m
+	other.SHA256 = strings.Repeat("0", 64)
+	if c.GaveUp(other) {
+		t.Fatal("giving up applied to a different release of the same version")
 	}
 }
 
@@ -147,7 +157,7 @@ func TestApplyNetworkFailuresDoNotCount(t *testing.T) {
 			t.Fatalf("attempt %d: err = %v", i, err)
 		}
 	}
-	if st, _ := install.LoadState(exe); st.Skips("1.1.0") {
-		t.Fatal("a version was skipped because of network failures")
+	if c.GaveUp(fs.m) {
+		t.Fatal("gave up because of network failures")
 	}
 }

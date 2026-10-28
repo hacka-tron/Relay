@@ -232,7 +232,7 @@ func publish(ctx context.Context, bad bool) error {
 		return err
 	}
 	if bad {
-		step("Relay refused " + next + " because its hash no longer matches the signed one. After two retries it gave up on that version and kept running")
+		step("Relay refused " + next + " because its hash no longer matches the signed one. After two retries it stopped trying that release and kept running")
 	} else {
 		step("Relay updated itself to " + next)
 	}
