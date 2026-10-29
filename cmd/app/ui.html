@@ -195,9 +195,13 @@
     var chosen = el('intervals').querySelector('[aria-pressed=true]');
     if (open && chosen) chosen.focus();
   }
-  // Tabbing out of the picker closes it, like clicking outside does.
+  // Tabbing out of the picker closes it, like clicking outside does. Safari
+  // and the Mac window do not focus a button when it is clicked, so pressing
+  // another choice moves focus to nothing. That must not close the picker
+  // before the click lands. Clicks outside are handled below.
   el('picker').addEventListener('focusout', function (e) {
-    if (!el('picker').contains(e.relatedTarget) && e.relatedTarget !== el('interval')) setPicker(false);
+    var to = e.relatedTarget;
+    if (to && !el('picker').contains(to) && to !== el('interval')) setPicker(false);
   });
   el('interval').onclick = function (e) { e.stopPropagation(); setPicker(el('picker').hidden); };
   document.addEventListener('click', function (e) {
